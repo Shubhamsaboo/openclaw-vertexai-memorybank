@@ -1,42 +1,32 @@
-import { execSync } from "child_process";
 import { createHash } from "crypto";
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
-// No runtime dependencies — tool parameters use plain JSON Schema objects
 
-// --- User-Agent ---
-const PLUGIN_VERSION = "0.1.0";
-const USER_AGENT = `openclaw-vertexai-memorybank/${PLUGIN_VERSION}`;
+// --- SDK Clients ---
+import { v1beta1 } from "@google-cloud/aiplatform";
 
-/** Shared fetch wrapper that injects User-Agent on every request. */
-async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  const headers = new Headers(init.headers);
-  headers.set("User-Agent", USER_AGENT);
-  return fetch(url, { ...init, headers });
+let memoryBankClient: v1beta1.MemoryBankServiceClient | null = null;
+let reasoningEngineClient: v1beta1.ReasoningEngineServiceClient | null = null;
+
+function getMemoryBankClient(cfg: MemoryBankConfig): v1beta1.MemoryBankServiceClient {
+  if (!memoryBankClient) {
+    memoryBankClient = new v1beta1.MemoryBankServiceClient({
+      apiEndpoint: `${cfg.location}-aiplatform.googleapis.com`,
+    });
+  }
+  return memoryBankClient;
 }
 
-// --- Auth ---
-let cachedToken: string | null = null;
-let tokenExpiresAt = 0;
-
-function getAccessToken(): string {
-  if (cachedToken && Date.now() < tokenExpiresAt) return cachedToken;
-  try {
-    cachedToken = execSync(
-      "gcloud auth application-default print-access-token 2>/dev/null",
-      { encoding: "utf8" }
-    ).trim();
-    tokenExpiresAt = Date.now() + 55 * 60 * 1000;
-    return cachedToken;
-  } catch {
-    throw new Error(
-      "Failed to get ADC token. Run: gcloud auth application-default login"
-    );
+function getReasoningEngineClient(cfg: MemoryBankConfig): v1beta1.ReasoningEngineServiceClient {
+  if (!reasoningEngineClient) {
+    reasoningEngineClient = new v1beta1.ReasoningEngineServiceClient({
+      apiEndpoint: `${cfg.location}-aiplatform.googleapis.com`,
+    });
   }
+  return reasoningEngineClient;
 }
 
 // --- Config ---
-const BASE = "https://LOCATION-aiplatform.googleapis.com/v1beta1";
 
 interface MemoryBankConfig {
   projectId: string;
@@ -209,29 +199,14 @@ function getChangedFiles(files: MemoryFile[]): MemoryFile[] {
   });
 }
 
-// --- API ---
+// --- Helpers ---
 function parentName(cfg: MemoryBankConfig): string {
   return `projects/${cfg.projectId}/locations/${cfg.location}/reasoningEngines/${cfg.reasoningEngineId}`;
 }
 
-function apiBase(cfg: MemoryBankConfig): string {
-  return BASE.replace("LOCATION", cfg.location);
-}
-
-async function apiCall(cfg: MemoryBankConfig, path: string, body: any, method = "POST"): Promise<any> {
-  const token = getAccessToken();
-  const url = `${apiBase(cfg)}/${path}`;
-  const res = await apiFetch(url, {
-    method,
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: method !== "GET" ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Memory Bank API ${res.status}: ${text}`);
-  }
-  return res.json();
-}
+// Convert scope Record to the SDK's map format
+function scopeToSdk(scope: Record<string, string>): { [key: string]: string } {
+  return { ...scope };}
 
 // --- Core operations ---
 
@@ -239,12 +214,14 @@ async function retrieveMemories(cfg: MemoryBankConfig, query: string): Promise<a
   const parent = parentName(cfg);
   const scope = cfg.scope || { agent_name: "openclaw" };
   const topK = cfg.topK || 10;
+  const client = getMemoryBankClient(cfg);
   try {
-    const result = await apiCall(cfg, `${parent}/memories:retrieve`, {
-      scope,
+    const [response] = await client.retrieveMemories({
+      parent,
+      scope: scopeToSdk(scope),
       similaritySearchParams: { searchQuery: query, topK },
     });
-    const memories = result.retrievedMemories || [];
+    const memories = (response as any).retrievedMemories || [];
     const maxDist = cfg.maxDistance;
     if (maxDist != null) {
       const filtered = memories.filter((m: any) => m.distance != null && m.distance <= maxDist);
@@ -267,6 +244,7 @@ async function captureFromConversation(
 ): Promise<void> {
   const parent = parentName(cfg);
   const scope = cfg.scope || { agent_name: "openclaw" };
+  const client = getMemoryBankClient(cfg);
 
   // Only send the last user+assistant pair (not the whole conversation)
   const lastPair = messages
@@ -283,18 +261,38 @@ async function captureFromConversation(
   }));
 
   // Fire-and-forget: don't block agent waiting for consolidation results
-  const ctx = toGenerateContext(cfg);
-  await fireAndForget(ctx, `${ctx.parent}/memories:generate`, {
-    scope: ctx.scope,
-    direct_contents_source: { events },
-    revision_labels: { source: "capture" },
+  client.generateMemories({
+    parent,
+    scope: scopeToSdk(scope),
+    directContentsSource: { events },
+  }).then(async ([operation]) => {
+    console.log("[memory-vertex] capture fired (bg)");
+    const [result] = await (operation as any).promise();
+    const generated = (result as any)?.generatedMemories || [];
+    if (generated.length > 0) {
+      const created = generated.filter((m: any) => m.action === "CREATED").length;
+      const updated = generated.filter((m: any) => m.action === "UPDATED").length;
+      const deleted = generated.filter((m: any) => m.action === "DELETED").length;
+      const facts = generated
+        .filter((m: any) => m.action === "CREATED" || m.action === "UPDATED")
+        .map((m: any) => m.memory?.fact || "")
+        .filter((f: string) => f);
+      console.log(
+        `[memory-vertex] captured: ${created} new, ${updated} updated, ${deleted} deleted`
+      );
+      if (facts.length > 0) {
+        console.log(`[memory-vertex] facts: ${facts.join(" | ")}`);
+      }
+    }
+  }).catch((e: any) => {
+    console.error(`[memory-vertex] capture error: ${e.message}`);
   });
-  console.log("[memory-vertex] capture fired (bg)");
 }
 
 async function syncFiles(cfg: MemoryBankConfig, files: MemoryFile[]): Promise<void> {
   const parent = parentName(cfg);
   const scope = cfg.scope || { agent_name: "openclaw" };
+  const client = getMemoryBankClient(cfg);
 
   for (const file of files) {
     const chunks: string[] = [];
@@ -310,11 +308,12 @@ async function syncFiles(cfg: MemoryBankConfig, files: MemoryFile[]): Promise<vo
     }));
 
     try {
-      await apiCall(cfg, `${parent}/memories:generate`, {
-        scope,
-        direct_contents_source: { events },
-        revision_labels: { source: "file-sync", file: file.relativePath },
+      const [operation] = await client.generateMemories({
+        parent,
+        scope: scopeToSdk(scope),
+        directContentsSource: { events },
       });
+      await (operation as any).promise();
       syncIndex.entries[file.relativePath] = {
         hash: file.hash,
         syncedAt: new Date().toISOString(),
@@ -331,11 +330,9 @@ async function syncInstanceConfig(cfg: MemoryBankConfig): Promise<void> {
   const parent = parentName(cfg);
   const topics = cfg.memoryTopics || DEFAULT_TOPICS;
   const perspective = cfg.perspective || "third";
+  const reClient = getReasoningEngineClient(cfg);
 
   try {
-    const token = getAccessToken();
-    const url = `${apiBase(cfg)}/${parent}?updateMask=contextSpec.memoryBankConfig`;
-
     const customizationConfig: any = {
       memory_topics: topics,
       enable_third_person_memories: perspective !== "first",
@@ -358,17 +355,17 @@ async function syncInstanceConfig(cfg: MemoryBankConfig): Promise<void> {
       };
     }
 
-    const res = await apiFetch(url, {
-      method: "PATCH",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        context_spec: { memory_bank_config: memoryBankConfig },
-      }),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Memory Bank API ${res.status}: ${text}`);
-    }
+    const response = (await (reClient.updateReasoningEngine as any)({
+      reasoningEngine: {
+        name: parent,
+        spec: {
+          contextSpec: { memoryBankConfig },
+        },
+      },
+      updateMask: { paths: ["spec.context_spec.memory_bank_config"] },
+    })) as any[];
+    const operation = response[0];
+    await operation.promise();
 
     const parts = [`${topics.length} topics`, `${perspective}-person`];
     if (cfg.ttlSeconds) parts.push(`TTL ${Math.round(cfg.ttlSeconds / 86400)}d`);
@@ -378,83 +375,17 @@ async function syncInstanceConfig(cfg: MemoryBankConfig): Promise<void> {
   }
 }
 
-// --- Lightweight context for memory generation (avoids passing full config) ---
-interface GenerateContext {
-  location: string;
-  parent: string;
-  scope: Record<string, string>;
-}
-
-function toGenerateContext(cfg: MemoryBankConfig): GenerateContext {
-  return {
-    location: cfg.location,
-    parent: parentName(cfg),
-    scope: cfg.scope || { agent_name: "openclaw" },
-  };
-}
-
-// --- Fire-and-forget API call (no response parsing, no LRO wait) ---
-async function fireAndForget(ctx: GenerateContext, path: string, body: any): Promise<void> {
-  const token = getAccessToken();
-  const url = `https://${ctx.location}-aiplatform.googleapis.com/v1beta1/${path}`;
+// --- Direct memory creation ---
+async function createMemory(cfg: MemoryBankConfig, fact: string): Promise<void> {
+  const parent = parentName(cfg);
+  const scope = cfg.scope || { agent_name: "openclaw" };
+  const client = getMemoryBankClient(cfg);
   try {
-    const res = await apiFetch(url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      console.error(`[memory-vertex] fire-and-forget ${res.status}: ${text.slice(0, 200)}`);
-    }
-  } catch (e: any) {
-    console.error(`[memory-vertex] fire-and-forget error: ${e.message}`);
-  }
-}
-
-// --- Direct memory creation (via consolidation pipeline) ---
-interface CreateMemoryOptions {
-  /** If true, await the full response. If false (default), fire-and-forget. */
-  waitForResult?: boolean;
-  /** Source label for tracing (e.g. "capture", "file-sync", "cli-remember") */
-  source?: string;
-}
-
-async function createMemory(
-  cfg: MemoryBankConfig,
-  fact: string,
-  options: CreateMemoryOptions = {},
-): Promise<void> {
-  const ctx = toGenerateContext(cfg);
-  const { waitForResult = false, source = "unknown" } = options;
-  const body: any = {
-    scope: ctx.scope,
-    direct_memories_source: {
-      direct_memories: [{ fact }],
-    },
-    revision_labels: { source },
-  };
-
-  if (!waitForResult) {
-    // Fire-and-forget: don't block the agent
-    await fireAndForget(ctx, `${ctx.parent}/memories:generate`, body);
-    console.log(`[memory-vertex] remember fired (bg): ${fact}`);
-    return;
-  }
-
-  // Synchronous: wait for consolidation result
-  try {
-    const result = await apiCall(cfg, `${ctx.parent}/memories:generate`, body);
-    const generated = result.generatedMemories || [];
-    const created = generated.filter((m: any) => m.action === "CREATED").length;
-    const updated = generated.filter((m: any) => m.action === "UPDATED").length;
-    if (created > 0 || updated > 0) {
-      console.log(`[memory-vertex] remembered (${created} new, ${updated} updated): ${fact}`);
-    } else if (generated.length === 0) {
-      console.log(`[memory-vertex] remember queued/deduped: ${fact}`);
-    } else {
-      console.log(`[memory-vertex] remembered: ${fact}`);
-    }
+    const [operation] = await client.createMemory({
+      parent,
+      memory: { fact, scope: scopeToSdk(scope) },    });
+    await (operation as any).promise();
+    console.log(`[memory-vertex] remembered: ${fact}`);
   } catch (e: any) {
     console.error(`[memory-vertex] create memory error: ${e.message}`);
     throw e;
@@ -464,16 +395,10 @@ async function createMemory(
 // --- Delete a memory ---
 async function deleteMemory(cfg: MemoryBankConfig, memoryId: string): Promise<void> {
   const parent = parentName(cfg);
-  const token = getAccessToken();
-  const url = `https://${cfg.location}-aiplatform.googleapis.com/v1beta1/${parent}/memories/${memoryId}`;
-  const resp = await apiFetch(url, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error(`Memory Bank API ${resp.status}: ${body}`);
-  }
+  const memoryName = memoryId.includes("/") ? memoryId : `${parent}/memories/${memoryId}`;
+  const client = getMemoryBankClient(cfg);
+  const [operation] = await client.deleteMemory({ name: memoryName });
+  await (operation as any).promise();
   console.log(`[memory-vertex] deleted memory: ${memoryId}`);
 }
 
@@ -487,7 +412,6 @@ async function deleteMemory(cfg: MemoryBankConfig, memoryId: string): Promise<vo
 //   4. Max pageSize is 100 even when requesting 1000
 //
 // This means counting requires paginating through ALL memories. We mitigate this by:
-//   - Using $fields=memories/name,nextPageToken to return only resource names (~12KB/page)
 //   - Caching the count in-memory with a 5-minute TTL
 //   - Auto-incrementing/decrementing on create/delete within the session
 //
@@ -504,8 +428,7 @@ const COUNT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 let countCache: CountCache | null = null;
 
 /**
- * Count memories using field-masked pagination (lightweight, no LLM calls).
- * Returns only resource names to minimize payload (~120 bytes/memory vs full objects).
+ * Count memories using paginated list (lightweight).
  */
 async function countMemories(cfg: MemoryBankConfig, opts?: { force?: boolean }): Promise<number> {
   // Return cached count if fresh
@@ -515,31 +438,19 @@ async function countMemories(cfg: MemoryBankConfig, opts?: { force?: boolean }):
 
   const parent = parentName(cfg);
   const scope = cfg.scope || { agent_name: "openclaw" };
+  const client = getMemoryBankClient(cfg);
   let total = 0;
   let pageToken: string | undefined;
 
   try {
     do {
-      const params = new URLSearchParams();
-      params.set("pageSize", "100");
-      params.set("filter", `scope="${JSON.stringify(scope).replace(/"/g, '\\"')}"`);
-      // Field mask: only return memory names + pagination token (no facts, topics, timestamps)
-      params.set("$fields", "memories/name,nextPageToken");
-      if (pageToken) params.set("pageToken", pageToken);
-
-      const token = getAccessToken();
-      const url = `${apiBase(cfg)}/${parent}/memories?${params.toString()}`;
-      const res = await apiFetch(url, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Memory Bank API ${res.status}: ${text}`);
-      }
-      const result = await res.json();
-      total += (result.memories || []).length;
-      pageToken = result.nextPageToken;
+      const [memories, , response] = await client.listMemories({
+        parent,
+        filter: `scope="${JSON.stringify(scope).replace(/"/g, '\\"')}"`,
+        pageSize: 100,
+        pageToken,      });
+      total += (memories || []).length;
+      pageToken = (response as any)?.nextPageToken || undefined;
     } while (pageToken);
 
     countCache = { count: total, fetchedAt: Date.now() };
@@ -568,30 +479,20 @@ async function listMemories(
 ): Promise<any[]> {
   const parent = parentName(cfg);
   const effectiveScope = scope || cfg.scope || { agent_name: "openclaw" };
+  const client = getMemoryBankClient(cfg);
   const all: any[] = [];
   let pageToken: string | undefined;
 
   try {
     do {
-      const params = new URLSearchParams();
-      params.set("pageSize", "100");
-      params.set("filter", `scope="${JSON.stringify(effectiveScope).replace(/"/g, '\\"')}"`);
-      if (pageToken) params.set("pageToken", pageToken);
-
-      const token = getAccessToken();
-      const url = `${apiBase(cfg)}/${parent}/memories?${params.toString()}`;
-      const res = await apiFetch(url, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Memory Bank API ${res.status}: ${text}`);
-      }
-      const result = await res.json();
-      const memories = result.memories || [];
-      all.push(...memories.map((m: any) => ({ memory: m })));
-      pageToken = result.nextPageToken;
+      const [memories, , response] = await client.listMemories({
+        parent,
+        filter: `scope="${JSON.stringify(effectiveScope).replace(/"/g, '\\"')}"`,
+        pageSize: 100,
+        pageToken,      });
+      const items = memories || [];
+      all.push(...items.map((m: any) => ({ memory: m })));
+      pageToken = (response as any)?.nextPageToken || undefined;
     } while (pageToken);
 
     // Update count cache as a side effect
@@ -765,22 +666,8 @@ const plugin = {
         required: ["memory_id"],
       },
       async execute(_toolCallId: string, params: { memory_id: string }) {
-        const parent = parentName(config);
-        const memoryName = params.memory_id.includes("/") ? params.memory_id : `${parent}/memories/${params.memory_id}`;
         try {
-          const token = getAccessToken();
-          const url = `${apiBase(config)}/${memoryName}`;
-          const res = await apiFetch(url, {
-            method: "DELETE",
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (!res.ok) {
-            const text = await res.text();
-            return {
-              content: [{ type: "text" as const, text: `Failed to delete memory: ${res.status} ${text}` }],
-              details: { deleted: false },
-            };
-          }
+          await deleteMemory(config, params.memory_id);
           adjustCachedCount(-1);
           return {
             content: [{ type: "text" as const, text: `Memory deleted: ${params.memory_id}` }],
@@ -810,86 +697,85 @@ const plugin = {
       },
       async execute(_toolCallId: string, params: { memory_id: string; new_fact: string }) {
         const parent = parentName(config);
-        const base = apiBase(config);
         const memoryName = params.memory_id.includes("/") ? params.memory_id : `${parent}/memories/${params.memory_id}`;
-
-        // PATCH with exponential backoff for transient errors
-        const maxRetries = 3;
-        async function patchWithRetry(): Promise<Response> {
-          let lastRes!: Response;
-          for (let attempt = 0; attempt < maxRetries; attempt++) {
-            const token = getAccessToken();
-            lastRes = await apiFetch(`${base}/${memoryName}?updateMask=fact`, {
-              method: "PATCH",
-              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ fact: params.new_fact }),
-            });
-            // Success or non-transient error: stop retrying
-            if (lastRes.ok || ![429, 500, 503].includes(lastRes.status)) break;
-            // Transient error: wait and retry
-            const delay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
-            await new Promise((r) => setTimeout(r, delay));
-            console.log(`[memory-vertex] correct: PATCH retry ${attempt + 1}/${maxRetries} (${lastRes.status})`);
-          }
-          return lastRes;
-        }
-
+        const client = getMemoryBankClient(config);
         try {
-          const res = await patchWithRetry();
+          const [operation] = await client.updateMemory({
+            memory: { name: memoryName, fact: params.new_fact },
+            updateMask: { paths: ["fact"] },
+          });
+          const [updated] = await (operation as any).promise();
+          return {
+            content: [{ type: "text" as const, text: `Memory corrected: ${JSON.stringify(updated, null, 2)}` }],
+            details: { corrected: true, method: "patch" },
+          };
+        } catch (updateErr: any) {
+          // Fallback: delete + regenerate if updateMemory fails (e.g., 400/405)
+          const statusCode = updateErr?.code || updateErr?.status;
+          if (statusCode === 3 /* INVALID_ARGUMENT */ || statusCode === 12 /* UNIMPLEMENTED */ || statusCode === 400 || statusCode === 405) {
+            // First, fetch the old memory to preserve its fact for recovery
+            let oldFact: string | null = null;
+            try {
+              const [oldMemory] = await client.getMemory({ name: memoryName });
+              oldFact = (oldMemory as any)?.fact || null;
+            } catch { /* best-effort */ }
 
-          if (res.ok) {
-            const updated = await res.json();
-            return {
-              content: [{ type: "text" as const, text: `Memory corrected: ${params.new_fact}` }],
-              details: { corrected: true, method: "patch" },
-            };
-          }
-
-          // 400/404: memory may not exist. Confirm with GET, then create.
-          if (res.status === 400 || res.status === 404) {
-            const getRes = await apiFetch(`${base}/${memoryName}`, {
-              method: "GET",
-              headers: { Authorization: `Bearer ${getAccessToken()}` },
-            });
-
-            if (getRes.ok) {
-              // Memory exists but PATCH failed for another reason
-              const text = await res.text();
+            try {
+              const [delOp] = await client.deleteMemory({ name: memoryName });
+              await (delOp as any).promise();
+            } catch (delErr: any) {
               return {
-                content: [{ type: "text" as const, text: `PATCH failed on existing memory (${res.status}): ${text.slice(0, 200)}` }],
+                content: [{ type: "text" as const, text: `Failed to delete old memory for correction: ${delErr.message}` }],
                 details: { corrected: false },
               };
             }
 
-            // Memory is gone — create a new one via consolidation pipeline
             const scope = config.scope || { agent_name: "openclaw" };
-            await apiCall(config, `${parent}/memories:generate`, {
-              scope,
-              direct_memories_source: { direct_memories: [{ fact: params.new_fact }] },
-              revision_labels: { source: "tool-correct" },
-            });
+            try {
+              const [genOp] = await client.generateMemories({
+                parent,
+                scope: scopeToSdk(scope),
+                directContentsSource: {
+                  events: [{
+                    content: { role: "user", parts: [{ text: `Remember this fact: ${params.new_fact}` }] },
+                  }],
+                },
+              });
+              await (genOp as any).promise();
+            } catch (genErr: any) {
+              // Regeneration failed — attempt to restore the old memory
+              if (oldFact) {
+                try {
+                  const [restoreOp] = await client.createMemory({
+                    parent,
+                    memory: { fact: oldFact, scope: scopeToSdk(scope) },
+                  });
+                  await (restoreOp as any).promise();
+                  return {
+                    content: [{ type: "text" as const, text: `Correction failed (regeneration error), old memory restored: ${genErr.message}` }],
+                    details: { corrected: false, recovered: true, error: genErr.message },
+                  };
+                } catch { /* recovery also failed */ }
+              }
+              return {
+                content: [{ type: "text" as const, text: `Correction failed and old memory could not be restored: ${genErr.message}` }],
+                details: { corrected: false, recovered: false, error: genErr.message },
+              };
+            }
             return {
-              content: [{ type: "text" as const, text: `Memory not found, created new: ${params.new_fact}` }],
-              details: { corrected: true, method: "create" },
+              content: [{ type: "text" as const, text: `Memory corrected (delete+regenerate): ${params.new_fact}` }],
+              details: { corrected: true, method: "delete-regenerate" },
             };
           }
-
-          // Other errors
-          const text = await res.text();
           return {
-            content: [{ type: "text" as const, text: `Failed to update memory: ${res.status} ${text.slice(0, 200)}` }],
+            content: [{ type: "text" as const, text: `Failed to update memory: ${updateErr.message}` }],
             details: { corrected: false },
-          };
-        } catch (e: any) {
-          return {
-            content: [{ type: "text" as const, text: `Error correcting memory: ${e.message}` }],
-            details: { corrected: false, error: e.message },
           };
         }
       },
     });
 
-    // memorybank_stats — Get memory statistics (uses lightweight field-masked count)
+// memorybank_stats — Get memory statistics (uses lightweight field-masked count)
     api.registerTool({
       name: "memorybank_stats",
       description: "Get Memory Bank statistics: total count, breakdown by topic, and scope info. Uses a cached count (5-min TTL) to avoid unnecessary API calls.",
@@ -949,12 +835,7 @@ const plugin = {
             console.log(`  Perspective: ${config.perspective || "third"}-person`);
             console.log(`  TTL:         ${config.ttlSeconds ? `${Math.round(config.ttlSeconds / 86400)} days` : "none (memories persist forever)"}`);
             console.log(`  Introspect:  ${config.introspection || "scores"}`);
-            try {
-              getAccessToken();
-              console.log("  Auth:        OK");
-            } catch {
-              console.log("  Auth:        FAILED");
-            }
+            console.log("  Auth:        SDK (ADC)");
             try {
               const total = await countMemories(config, { force: true });
               console.log(`  Memories:    ${total} in scope`);
@@ -990,7 +871,7 @@ const plugin = {
           .command("memorybank-list")
           .description("List all memories in scope")
           .option("--show-ids", "Show memory IDs")
-          .option("--count-only", "Only show count (uses lightweight field-masked API)")
+          .option("--count-only", "Only show count (uses lightweight paginated API)")
           .action(async (opts: any) => {
             if (opts.countOnly) {
               const total = await countMemories(config, { force: true });
@@ -1026,7 +907,7 @@ const plugin = {
           .argument("<fact>", "The fact to remember")
           .action(async (fact: string) => {
             try {
-              await createMemory(config, fact, { waitForResult: true, source: "cli-remember" });
+              await createMemory(config, fact);
               adjustCachedCount(1);
               console.log("Stored.");
             } catch {
