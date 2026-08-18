@@ -4,26 +4,24 @@ import { join } from "path";
 
 // --- SDK Clients ---
 import { v1beta1 } from "@google-cloud/aiplatform";
+import { getMemoryBankClient as getSharedMemoryBankClient, parentName as sharedParentName } from "./memorybank-core.js";
 
-let memoryBankClient: v1beta1.MemoryBankServiceClient | null = null;
-let reasoningEngineClient: v1beta1.ReasoningEngineServiceClient | null = null;
+// The Memory Bank client cache is shared with the Hermes adapter and keyed by
+// endpoint, preventing an independent location from reusing the wrong client.
+const reasoningEngineClients = new Map<string, v1beta1.ReasoningEngineServiceClient>();
 
 function getMemoryBankClient(cfg: MemoryBankConfig): v1beta1.MemoryBankServiceClient {
-  if (!memoryBankClient) {
-    memoryBankClient = new v1beta1.MemoryBankServiceClient({
-      apiEndpoint: `${cfg.location}-aiplatform.googleapis.com`,
-    });
-  }
-  return memoryBankClient;
+  return getSharedMemoryBankClient(cfg) as unknown as v1beta1.MemoryBankServiceClient;
 }
 
 function getReasoningEngineClient(cfg: MemoryBankConfig): v1beta1.ReasoningEngineServiceClient {
-  if (!reasoningEngineClient) {
-    reasoningEngineClient = new v1beta1.ReasoningEngineServiceClient({
-      apiEndpoint: `${cfg.location}-aiplatform.googleapis.com`,
-    });
+  const endpoint = `${cfg.location}-aiplatform.googleapis.com`;
+  let client = reasoningEngineClients.get(endpoint);
+  if (!client) {
+    client = new v1beta1.ReasoningEngineServiceClient({ apiEndpoint: endpoint });
+    reasoningEngineClients.set(endpoint, client);
   }
-  return reasoningEngineClient;
+  return client;
 }
 
 // --- Config ---
@@ -201,7 +199,7 @@ function getChangedFiles(files: MemoryFile[]): MemoryFile[] {
 
 // --- Helpers ---
 function parentName(cfg: MemoryBankConfig): string {
-  return `projects/${cfg.projectId}/locations/${cfg.location}/reasoningEngines/${cfg.reasoningEngineId}`;
+  return sharedParentName(cfg);
 }
 
 // Convert scope Record to the SDK's map format

@@ -1,6 +1,6 @@
 # openclaw-vertexai-memorybank
 
-Managed long-term memory for your OpenClaw agents, powered by [Vertex AI Memory Bank](https://docs.cloud.google.com/agent-builder/agent-engine/memory-bank/overview).
+Managed long-term memory for OpenClaw and Hermes Agent, powered by [Vertex AI Memory Bank](https://docs.cloud.google.com/agent-builder/agent-engine/memory-bank/overview).
 
 ### Why you need memory beyond OpenClaw core
 
@@ -17,6 +17,8 @@ Memories are extracted facts, not raw conversation logs. Only relevant memories 
 ---
 
 ![Architecture](architecture.jpg)
+
+> **Diagram source:** [`architecture.svg`](architecture.svg). Regenerate `architecture.jpg` after diagram changes with a browser SVG screenshot (for example, headless Chromium) followed by PNG-to-JPEG conversion; the rendered JPEG is included for npm/GitHub consumers.
 
 > **Disclaimer**: This is **not** an officially supported Google product.
 
@@ -117,6 +119,76 @@ After install, your agent starts with an empty memory. To catch up on context fr
 
 The agent can parse your session history and backfill Memory Bank with extracted facts. This gives you immediate value and your agent will recall decisions, preferences, and context from recent work without waiting for new conversations to build up memory organically.
 
+## Hermes Agent (MCP)
+
+The package also provides a dedicated MCP JSON-RPC-over-stdio server for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It is separate from the OpenClaw plugin: MCP responses are the only data written to stdout; diagnostics go to stderr.
+
+### Install and configure
+
+Build or install the package, then add this entry to `~/.hermes/config.yaml` (Hermes reads stdio servers from `mcp_servers`). Use an absolute package path when using a checkout.
+
+```yaml
+mcp_servers:
+  vertex_memorybank:
+    command: "node"
+    args: ["/absolute/path/openclaw-vertexai-memorybank/bin/hermes-mcp.js"]
+    env:
+      MEMORYBANK_PROJECT_ID: "your-gcp-project-id"
+      MEMORYBANK_LOCATION: "us-central1"
+      MEMORYBANK_REASONING_ENGINE_ID: "your-reasoning-engine-id"
+      # Hermes filters the stdio child environment. Pass service-account ADC explicitly.
+      GOOGLE_APPLICATION_CREDENTIALS: "/absolute/path/service-account.json"
+      # Alternative to GOOGLE_APPLICATION_CREDENTIALS for user ADC created by
+      # `gcloud auth application-default login`:
+      # HOME: "${HOME}"
+      # Explicitly match OpenClaw's scope to enable cross-runtime sharing.
+      MEMORYBANK_SCOPE: '{"user_id":"your-user-id"}'
+    trust: untrusted
+    tools:
+      include:
+        - memorybank_search
+        - memorybank_remember
+        - memorybank_forget
+        - memorybank_correct
+        - memorybank_stats
+```
+
+Hermes supports `${ENV_VAR}` interpolation in MCP config. It deliberately filters the environment of stdio children, so ADC must be deliberate: pass an absolute `GOOGLE_APPLICATION_CREDENTIALS` service-account JSON path, **or** pass `HOME` for user ADC created by `gcloud auth application-default login`. Do not use both unless that precedence is intended. An unset Hermes interpolation stays literal; this server rejects unresolved `${...}` values for required Memory Bank settings. Review and trust the command path before adding it. `trust: untrusted` asks Hermes to require approval for tools that are not marked read-only. Hermes records this stdio server's stderr at `~/.hermes/logs/mcp-stderr.log`.
+
+The tools appear in Hermes as `mcp__vertex_memorybank__memorybank_search` and similarly for the remaining tools. The recommended `tools.include` allow-list limits discovery to the five Memory Bank tools above; include mutating tools only when they are appropriate for the profile.
+
+The server requires these explicit environment variables:
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `MEMORYBANK_PROJECT_ID` | yes | GCP project ID or number |
+| `MEMORYBANK_LOCATION` | yes | Vertex AI region |
+| `MEMORYBANK_REASONING_ENGINE_ID` | yes | Agent Engine reasoning engine ID |
+| `MEMORYBANK_SCOPE` | no | JSON object scope; default is `{"agent_name":"hermes"}` |
+| `MEMORYBANK_TOP_K` | no | Search result count, integer 1–100 |
+
+The Hermes default scope isolates this runtime. To share memory with OpenClaw, explicitly configure **the identical `scope` object** in OpenClaw and `MEMORYBANK_SCOPE` (for example, `{ "user_id": "your-user-id" }`). Scope matching is exact.
+
+After editing the config, test the server and reload MCP tools:
+
+```bash
+hermes mcp test vertex_memorybank
+```
+
+```text
+/reload-mcp
+```
+
+### MCP tools
+
+- `memorybank_search(query, top_k?)`
+- `memorybank_remember(fact)`
+- `memorybank_forget(memory_id)`
+- `memorybank_correct(memory_id, new_fact)`
+- `memorybank_stats()`
+
+Malformed JSON-RPC requests and invalid tool arguments return protocol errors or a clean `isError` tool response; no stack traces are sent through the protocol.
+
 ## How It Works
 
 ```
@@ -146,7 +218,7 @@ User message arrives
 - **Few-shot examples** teach Memory Bank's extraction LLM what to capture (decisions, preferences) and what to ignore (status checks, debugging chatter)
 - **File sync** tracks SHA-256 hashes of workspace files and only re-syncs when content changes
 - **Topic sync** auto-configures memory topics, perspective, and few-shot examples on the Agent Engine instance at startup
-- **Consolidation** is handled by Memory Bank for all write paths. Conversation capture uses `direct_contents_source` (events format), while file sync and direct writes (`memorybank-remember`) use `direct_memories_source` (raw facts). All route through `GenerateMemories`. When a new fact contradicts an existing memory, it updates in place (e.g., "repo has 91K stars" becomes "repo has 100K stars"). No facts bypass the consolidation pipeline
+- **Consolidation** is handled by Memory Bank for generated writes. Conversation capture and file sync use `GenerateMemories` with `direct_contents_source`; direct `memorybank-remember` uses the Memory Bank `CreateMemory` API to store the supplied fact immediately. Generated memories can be deduplicated, updated, or removed by Memory Bank within their exact scope.
 - Authentication uses Google Application Default Credentials (ADC)
 
 ## Configuration
@@ -222,7 +294,7 @@ The plugin registers four tools that the agent can call directly during conversa
 |------|-------------|
 | `memorybank_search` | Semantic search that returns facts with similarity scores, topics, timestamps, and memory IDs |
 | `memorybank_forget` | Delete a specific memory by ID. Useful when the agent discovers outdated or incorrect information |
-| `memorybank_correct` | Update a memory's fact text in place (PATCH with exponential backoff retry; if memory is missing, creates via consolidation pipeline) |
+| `memorybank_correct` | Update a memory fact with `updateMemory`. When that API is unavailable, it fetches the old fact, deletes, and regenerates; a failed regeneration attempts to restore the old fact and returns any replacement/restored resource name. |
 | `memorybank_stats` | Total memory count, breakdown by topic, and scope info. Uses lightweight field-masked counting |
 
 These use `api.registerTool()` and are available to the agent automatically when the plugin is enabled.

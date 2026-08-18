@@ -1,6 +1,6 @@
-# FAQ — Vertex AI Memory Bank Plugin for OpenClaw
+# FAQ — Vertex AI Memory Bank for OpenClaw and Hermes
 
-Answers to common questions about how Vertex AI Memory Bank works, pricing, scoping, and plugin design decisions.
+Answers to common questions about Vertex AI Memory Bank, its OpenClaw plugin and Hermes MCP adapter, pricing, scoping, and design decisions.
 
 > **Official docs:** [Vertex AI Agent Engine Memory Bank overview](https://docs.cloud.google.com/agent-builder/agent-engine/memory-bank/overview)
 
@@ -22,6 +22,7 @@ Answers to common questions about how Vertex AI Memory Bank works, pricing, scop
 - [Glossary / Jargon Entries](#glossary--jargon-entries)
 - [SDK & API](#sdk--api)
 - [Links & Resources](#links--resources)
+- [Hermes Agent MCP](#hermes-agent-mcp)
 
 ---
 
@@ -227,7 +228,7 @@ Four tools via `api.registerTool()`, available to the agent during conversation:
 |------|-------------|
 | `memorybank_search` | Semantic similarity search — returns facts, scores, topics, timestamps, and memory IDs |
 | `memorybank_forget` | Delete a memory by ID. Agent can clean up outdated/incorrect information |
-| `memorybank_correct` | Update a memory's fact text. Uses PATCH with exponential backoff retry; if memory is missing, creates via consolidation pipeline |
+| `memorybank_correct` | Update with `updateMemory`; if unavailable, fetch the old fact, delete, and regenerate. A failed regeneration attempts restoration and reports any replacement/restored resource name. |
 | `memorybank_stats` | Total count, topic breakdown, scope info. Uses lightweight field-masked counting |
 
 **When would the agent use these?**
@@ -270,7 +271,7 @@ Memory Bank isn't designed for structured reference data, but can be repurposed 
 
 ## SDK & API
 
-**Node.js SDK:** There is no official Node.js SDK for Memory Bank. The REST API is the only option for TypeScript. Using raw `fetch()` against the REST endpoints is the correct approach.
+**Node.js SDK:** This plugin uses the official `@google-cloud/aiplatform` v1beta1 clients for Memory Bank and Reasoning Engine operations. Verify SDK surface availability against the installed package version when upgrading.
 
 **Python SDK:** Official support via `google-cloud-aiplatform>=1.111.0`:
 ```python
@@ -306,3 +307,42 @@ https://{LOCATION}-aiplatform.googleapis.com/v1beta1/projects/{PROJECT}/location
 
 ### Plugin Repository
 - [openclaw-vertexai-memorybank](https://github.com/Shubhamsaboo/openclaw-vertexai-memorybank)
+
+## Hermes Agent MCP
+
+### Can I use this without OpenClaw?
+
+Yes. `vertexai-memorybank-hermes` is a standalone MCP JSON-RPC-over-stdio entry point. Configure it in `~/.hermes/config.yaml` under `mcp_servers`; the OpenClaw plugin remains unchanged and is not required at runtime.
+
+```yaml
+mcp_servers:
+  vertex_memorybank:
+    command: "node"
+    args: ["/absolute/path/openclaw-vertexai-memorybank/bin/hermes-mcp.js"]
+    env:
+      MEMORYBANK_PROJECT_ID: "${MEMORYBANK_PROJECT_ID}"
+      MEMORYBANK_LOCATION: "${MEMORYBANK_LOCATION}"
+      MEMORYBANK_REASONING_ENGINE_ID: "${MEMORYBANK_REASONING_ENGINE_ID}"
+      # Hermes filters stdio child environments: choose one ADC route.
+      GOOGLE_APPLICATION_CREDENTIALS: "/absolute/path/service-account.json"
+      # Alternative: omit the line above and use gcloud user ADC:
+      # HOME: "${HOME}"
+      MEMORYBANK_SCOPE: '{"user_id":"your-user-id"}'
+    trust: untrusted
+    tools:
+      include: [memorybank_search, memorybank_remember, memorybank_forget, memorybank_correct, memorybank_stats]
+```
+
+Hermes expands `${ENV_VAR}` values when connecting the server, but filters the environment of stdio children. Pass an absolute `GOOGLE_APPLICATION_CREDENTIALS` service-account JSON path, or pass `HOME` so the Google SDK can find user ADC created with `gcloud auth application-default login`. Do not leave an unresolved `${...}` value in required Memory Bank settings: Hermes preserves it literally and this server rejects it. Use `hermes mcp test vertex_memorybank` to test the connection and `/reload-mcp` after configuration changes. Hermes names discovered tools `mcp__vertex_memorybank__memorybank_search`, etc. Server stderr is written to `~/.hermes/logs/mcp-stderr.log`.
+
+### How do I share memories between Hermes and OpenClaw?
+
+Configure exactly the same Vertex project, location, reasoning engine, and scope in both runtimes. For example, OpenClaw can use `{ "user_id": "your-user-id" }` and Hermes can set `MEMORYBANK_SCOPE` to `'{"user_id":"your-user-id"}'`. The Hermes default is `{ "agent_name": "hermes" }`, so it does **not** share memories until you explicitly use a common scope.
+
+### Is the Hermes MCP configuration safe to copy?
+
+Review the absolute command path before trusting it. A stdio MCP server is a local process. Use `tools.include` to expose only the listed tools, and consider excluding `memorybank_forget` and `memorybank_correct` in profiles that should be read-only. Keep credentials out of the YAML: Hermes supports environment interpolation, while Vertex authentication uses Application Default Credentials.
+
+### Why does MCP output look like JSON only?
+
+That is intentional. MCP uses stdout as its wire protocol. This server writes JSON-RPC responses only to stdout and logs configuration and operational diagnostics to stderr, so Hermes can reliably parse requests and responses.

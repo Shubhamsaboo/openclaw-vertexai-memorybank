@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="1143" viewBox="0 0 2048 1143">
+  <rect width="2048" height="1143" fill="#ffffff"/>
+  <style>
+    text{font-family:Arial,sans-serif;fill:#16364e}.title{font-size:47px;font-weight:bold}.heading{font-size:35px;font-weight:bold}.body{font-size:26px;fill:#274c65}.label{font-size:22px;fill:#365a75}
+  </style>
+  <defs><marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12z" fill="#527a99"/></marker></defs>
+  <text x="485" y="75" class="title">Vertex AI Memory Bank — OpenClaw and Hermes architecture</text>
+  <g stroke-width="5">
+    <rect x="90" y="140" width="875" height="430" rx="28" fill="#eaf4fb" stroke="#1f6b99"/>
+    <text x="125" y="205" class="heading">OpenClaw plugin adapter</text>
+    <rect x="135" y="245" width="360" height="125" rx="16" fill="#ffffff" stroke="#72a6c8"/>
+    <text x="160" y="295" class="heading">Auto recall</text><text x="160" y="335" class="body">before_agent_start</text>
+    <rect x="545" y="245" width="370" height="125" rx="16" fill="#ffffff" stroke="#72a6c8"/>
+    <text x="570" y="295" class="heading">Auto capture</text><text x="570" y="335" class="body">agent_end + noise filter</text>
+    <rect x="135" y="405" width="360" height="115" rx="16" fill="#ffffff" stroke="#72a6c8"/>
+    <text x="160" y="455" class="heading">File sync</text><text x="160" y="495" class="body">hash-tracked workspace files</text>
+    <rect x="545" y="405" width="370" height="115" rx="16" fill="#ffffff" stroke="#72a6c8"/>
+    <text x="570" y="455" class="heading">CLI + agent tools</text><text x="570" y="495" class="body">search • remember • forget • stats</text>
+
+    <rect x="1085" y="140" width="873" height="430" rx="28" fill="#eaf4fb" stroke="#1f6b99"/>
+    <text x="1120" y="205" class="heading">Hermes MCP adapter</text>
+    <text x="1120" y="270" class="body">JSON-RPC over stdio</text>
+    <text x="1120" y="315" class="body">stdout: protocol only • stderr: diagnostics</text>
+    <text x="1120" y="360" class="body">mcp__vertex_memorybank__memorybank_*</text>
+    <text x="1120" y="405" class="body">search • remember • forget • correct • stats</text>
+    <text x="1120" y="450" class="body">explicit scope enables cross-runtime sharing</text>
+    <text x="1120" y="505" class="body">schema validation • tool annotations</text>
+
+    <rect x="430" y="695" width="1190" height="225" rx="28" fill="#dff3e8" stroke="#27734b"/>
+    <text x="470" y="760" class="heading">Shared Vertex AI Memory Bank core</text>
+    <text x="470" y="810" class="body">Explicit configuration • validated scopes • endpoint-keyed client reuse</text>
+    <text x="470" y="855" class="body">search • create • delete • correct with recovery • stats pagination</text>
+
+    <rect x="610" y="1000" width="830" height="105" rx="28" fill="#fff0d9" stroke="#a96618"/>
+    <text x="650" y="1050" class="heading">Vertex AI Memory Bank / Agent Engine</text>
+    <text x="650" y="1085" class="body">Google Cloud SDK • Application Default Credentials</text>
+  </g>
+  <path d="M525 570 L750 695" stroke="#527a99" stroke-width="7" marker-end="url(#arrow)"/><text x="520" y="645" class="label">OpenClaw plugin API</text>
+  <path d="M1520 570 L1300 695" stroke="#527a99" stroke-width="7" marker-end="url(#arrow)"/><text x="1370" y="645" class="label">MCP stdio</text>
+  <path d="M1024 920 L1024 1000" stroke="#527a99" stroke-width="7" marker-end="url(#arrow)"/><text x="1045" y="965" class="label">Vertex AI API</text>
+</svg>
