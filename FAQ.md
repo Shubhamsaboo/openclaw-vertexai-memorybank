@@ -6,24 +6,24 @@ Answers about [Agent Platform Memory Bank on Google Cloud](https://docs.cloud.go
 
 Gemini Enterprise Agent Platform Memory Bank is a managed service for generating, storing, and retrieving long-term agent memories. It supports natural-language memories and structured Memory Profiles, with scope-based isolation.
 
-The implementation in this repository uses the existing `@google-cloud/aiplatform` v1beta1 SDK and `reasoningEngines` resource segment. Those are required technical compatibility identifiers; this change does not migrate SDKs or alter core API behavior.
+The implementation in this repository uses the existing `@google-cloud/aiplatform` v1beta1 SDK and `reasoningEngines` resource segment. Those are required technical compatibility identifiers; the implementation does not migrate SDKs or alter core API behavior.
 
 ## Which operations are used?
 
-| Operation | Purpose in the service | Plugin use |
-| --- | --- | --- |
-| `GenerateMemories` | extracts memories from supplied conversation/content and consolidates generated memories in the same exact scope | auto-capture and file sync |
-| `CreateMemory` | directly writes a supplied memory | `memorybank-remember` and Hermes `memorybank_remember` |
-| `GetMemory` | fetches one named memory | correction fallback recovery |
-| `RetrieveMemories` | returns all scoped memories or similarity-search results | recall and search |
-| `ListMemories` | enumerates memories with pagination | list/count/stats |
-| update/delete operations | modify or remove a named memory | correction and forget |
+| Operation | Purpose in the service | OpenClaw plugin use | Hermes MCP use |
+| --- | --- | --- | --- |
+| `GenerateMemories` | extracts memories from supplied conversation/content and consolidates generated memories in the same exact scope | automatic capture and file sync | Not invoked automatically; no lifecycle capture/file sync |
+| `CreateMemory` | directly writes a supplied memory | `memorybank-remember` | `memorybank_remember` |
+| `GetMemory` | fetches one named memory | correction fallback recovery | correction fallback recovery |
+| `RetrieveMemories` | returns all scoped memories or similarity-search results | automatic recall and search | `memorybank_search` |
+| `ListMemories` | enumerates memories with pagination | list/count/stats | stats |
+| update/delete operations | modify or remove a named memory | correction and forget | `memorybank_correct` and `memorybank_forget` |
 
 `CreateMemory` is not a generation/consolidation request. Direct remembers can create duplicates until a later `GenerateMemories` run consolidates related facts.
 
 ## How does retrieval work?
 
-`RetrieveMemories` can return all memories in a scope or run similarity search. Similarity results are ordered from shortest to greatest Euclidean distance. This plugin calls the returned value a **similarity distance** and applies `maxDistance` as an optional plugin-side filter; lower is stricter.
+`RetrieveMemories` can return all memories in a scope or run similarity search. Similarity results are ordered from shortest to greatest Euclidean distance. The OpenClaw plugin calls the returned value a **similarity distance** and applies `maxDistance` as an optional plugin-side filter; lower is stricter.
 
 Use `GetMemory` for one resource, `RetrieveMemories` for scoped/similarity retrieval, and paginated `ListMemories` to enumerate a scope. They have distinct semantics.
 
@@ -70,16 +70,17 @@ They are not official Memory Bank request-field names.
 
 ## Why are some old-looking identifiers still present?
 
-The package/repository/plugin ID `openclaw-vertexai-memorybank`, `@google-cloud/aiplatform`, `google-cloud-aiplatform`, `import vertexai`, `v1beta1`, `aiplatform.googleapis.com`, `reasoningEngines`, `reasoningEngineId`, and `MEMORYBANK_REASONING_ENGINE_ID` are required compatibility identifiers in the present implementation and API examples. They do not describe the current product brand.
+The package/repository/OpenClaw-plugin ID `openclaw-vertexai-memorybank`, `@google-cloud/aiplatform`, `google-cloud-aiplatform`, `import vertexai`, `v1beta1`, `aiplatform.googleapis.com`, `reasoningEngines`, `reasoningEngineId`, and `MEMORYBANK_REASONING_ENGINE_ID` are required compatibility identifiers in the present implementation and API examples. They do not describe the current product brand.
 
 ## How do I use the Hermes MCP server?
 
-The executable is `agent-platform-memorybank-hermes`; the MCP server name is `agent-platform-memorybank`. Hermes support exists only in this unmerged PR, so no migration alias is needed. Configure the recommended Hermes key `agent_platform_memorybank`:
+The Hermes MCP executable is `agent-platform-memorybank-hermes` when the package has been linked or installed globally; from a checkout, configure `node` with the absolute `bin/hermes-mcp.js` path as shown in the README. The MCP server name is `agent-platform-memorybank`. Configure the recommended Hermes key `agent_platform_memorybank`:
 
 ```yaml
 mcp_servers:
   agent_platform_memorybank:
-    command: "agent-platform-memorybank-hermes"
+    command: "node"
+    args: ["/absolute/path/openclaw-vertexai-memorybank/bin/hermes-mcp.js"]
     env:
       MEMORYBANK_PROJECT_ID: "${MEMORYBANK_PROJECT_ID}"
       MEMORYBANK_LOCATION: "${MEMORYBANK_LOCATION}"
@@ -97,7 +98,7 @@ Hermes filters stdio-child environments. Pass an absolute service-account creden
 hermes mcp test agent_platform_memorybank
 ```
 
-The `mcp_servers` key is user-chosen: the recommended `agent_platform_memorybank` key exposes `mcp__agent_platform_memorybank__memorybank_search`; another key changes that `mcp__<key>__...` prefix. Existing local branch testers can keep another key. The server writes JSON-RPC only to stdout and `[memorybank]` diagnostics only to stderr.
+The `mcp_servers` key is user-chosen: the recommended `agent_platform_memorybank` key exposes `mcp__agent_platform_memorybank__memorybank_search`; another key changes that `mcp__<key>__...` prefix. The server writes JSON-RPC only to stdout and `[memorybank]` diagnostics only to stderr.
 
 ## Can Hermes and OpenClaw share memories?
 

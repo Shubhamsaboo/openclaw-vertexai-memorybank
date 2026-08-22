@@ -53,5 +53,24 @@
   },
   "dependencies": {
     "@google-cloud/aiplatform": "^6.5.0"
-  }
+  },
+  "description": "Managed Agent Platform Memory Bank integration for OpenClaw plugins and Hermes MCP tools.",
+  "keywords": [
+    "openclaw",
+    "hermes",
+    "mcp",
+    "agent-platform",
+    "memory-bank",
+    "google-cloud",
+    "long-term-memory"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shubhamsaboo/openclaw-vertexai-memorybank.git"
+  },
+  "homepage": "https://github.com/Shubhamsaboo/openclaw-vertexai-memorybank#readme",
+  "bugs": {
+    "url": "https://github.com/Shubhamsaboo/openclaw-vertexai-memorybank/issues"
+  },
+  "license": "MIT"
 }

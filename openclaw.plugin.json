@@ -8,7 +8,7 @@
     "properties": {
       "projectId": { "type": "string", "description": "GCP project ID or number" },
       "location": { "type": "string", "description": "GCP region (e.g. us-central1)" },
-      "reasoningEngineId": { "type": "string", "description": "Agent Engine reasoning engine ID" },
+      "reasoningEngineId": { "type": "string", "description": "Agent Platform reasoning engine ID (compatibility configuration name)" },
       "scope": { "type": "object", "description": "Memory scope for isolation (default: {agent_name: 'openclaw'})" },
       "autoRecall": { "type": "boolean", "description": "Retrieve and inject memories before each turn (default: true)" },
       "autoCapture": { "type": "boolean", "description": "Extract and store memories after each turn (default: true)" },

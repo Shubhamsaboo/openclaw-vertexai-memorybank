@@ -1,10 +1,12 @@
-# openclaw-vertexai-memorybank
+# Agent Platform Memory Bank for OpenClaw and Hermes
 
-Managed long-term memory for OpenClaw and Hermes Agent, powered by [Agent Platform Memory Bank on Google Cloud](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank). The repository, npm package, and OpenClaw plugin retain the legacy `openclaw-vertexai-memorybank` identifier for compatibility; it is not the current product name.
+Managed long-term memory for OpenClaw and [Hermes Agent](https://github.com/NousResearch/hermes-agent), powered by [Agent Platform Memory Bank on Google Cloud](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank).
 
-### Why you need memory beyond OpenClaw core
+> **Compatibility identifier:** The repository, npm package, and OpenClaw plugin retain `openclaw-vertexai-memorybank` for compatibility. It is not the visible project name.
 
-OpenClaw's built-in memory is per-agent and per-session. This plugin adds **user-scoped memory that can work across agents**, so preferences, decisions, and context can persist across sessions. Scope by user, project, or another deliberate isolation boundary.
+### Why memory beyond an agent runtime's core memory
+
+Runtime-local memory is commonly limited to an agent or session. This integration adds **user-scoped memory that can work across agents**, so preferences, decisions, and context can persist across sessions. Scope by user, project, or another deliberate isolation boundary.
 
 ### Why Agent Platform Memory Bank
 
@@ -12,7 +14,7 @@ Agent Platform Memory Bank is managed on Google Cloud: no vector database to run
 
 ### Token-efficient and effective
 
-Memories are extracted facts, not raw conversation logs. Before an OpenClaw turn, the plugin retrieves only relevant memories with similarity search rather than injecting an entire history.
+Memories are extracted facts, not raw conversation logs. OpenClaw recalls only relevant memories with similarity search before a turn, while Hermes agents explicitly invoke MCP tools when memory is needed.
 
 ---
 
@@ -22,25 +24,23 @@ Memories are extracted facts, not raw conversation logs. Before an OpenClaw turn
 
 > **Disclaimer:** This is not an officially supported Google product.
 
-## What It Does
+## Integration capabilities
 
-This plugin gives an OpenClaw agent persistent, cross-session memory using Agent Platform Memory Bank:
+| Capability | OpenClaw plugin | Hermes MCP server |
+| --- | --- | --- |
+| Native lifecycle auto-recall | Yes, before each agent turn | No; an agent invokes `memorybank_search` explicitly |
+| Native lifecycle auto-capture | Yes, after substantive turns | No; an agent invokes `memorybank_remember` explicitly |
+| Workspace memory-file sync | Yes | No |
+| Reasoning-engine topic sync | Yes, on plugin startup | No |
+| Memory operations | OpenClaw agent tools and CLI commands | Five user-invoked MCP tools over stdio |
+| Shared memory | Yes, with matching project, location, reasoning engine, and scope | Yes, with the same matching configuration |
 
-- **Auto-recall:** retrieves relevant memories before each turn and injects them into context
-- **Auto-capture:** sends the last substantive message pair for extraction after each turn
-- **Noise filtering:** skips short or trivial exchanges before generation
-- **Relevance threshold:** optionally filters retrieval results by similarity distance
-- **File sync:** sends changed workspace memory files for generation with hash-based change tracking
-- **Topic sync:** configures topics, perspective, and few-shot examples on the reasoning engine
-- **Agent tools and CLI commands:** provide the runtime-specific operations documented below
-- **Hermes MCP server:** exposes explicit MCP tools over stdio; it has no OpenClaw lifecycle hooks
-
-> **Note:** This plugin runs alongside OpenClaw's built-in `memory-core`; it adds cloud-backed long-term memory.
+Hermes has **no native lifecycle auto-recall or auto-capture**. Its MCP server exposes only explicit, user-invoked tools.
 
 ## Prerequisites
 
 1. A **Google Cloud project with billing enabled** and the **Agent Platform API** enabled. Enabling services requires `serviceusage.services.enable`, normally through `roles/serviceusage.serviceUsageAdmin` (or a broader role).
-2. IAM roles for the identity that runs the plugin:
+2. IAM roles for the identity that runs an integration:
    - `roles/aiplatform.user` to create or update a Memory Bank instance.
    - `roles/aiplatform.memoryUser` to read, write, and generate memories.
    Use narrower Memory Bank viewer/editor roles where appropriate.
@@ -61,7 +61,7 @@ This plugin gives an OpenClaw agent persistent, cross-session memory using Agent
 
 See the official [setup guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank/setup) and [API quickstart](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank/api-quickstart).
 
-## Installation
+## Install: OpenClaw plugin
 
 ### 1. Add plugin config to `openclaw.json`
 
@@ -84,7 +84,7 @@ Add configuration before installing the plugin so it can validate the required f
 }
 ```
 
-### 2. Clone, build, install
+### 2. Clone, build, and install
 
 ```bash
 git clone https://github.com/Shubhamsaboo/openclaw-vertexai-memorybank.git
@@ -116,21 +116,27 @@ openclaw restart
 
 After installation, ask the agent to generate memories from selected prior sessions. The agent can parse that history and submit it for extraction; review scope and source content before backfilling.
 
-## Hermes Agent (MCP)
+## Install: Hermes MCP server
 
-The package provides a dedicated MCP JSON-RPC-over-stdio server for [Hermes Agent](https://github.com/NousResearch/hermes-agent). Hermes support exists only in this unmerged PR, so no executable migration or compatibility alias is needed: install and use `agent-platform-memorybank-hermes`. MCP responses are written only to stdout and diagnostics only to stderr.
+The package provides a dedicated MCP JSON-RPC-over-stdio server for Hermes. MCP responses are written only to stdout and diagnostics only to stderr.
 
-### Install and configure
+### 1. Clone and build
 
-Build or install the package, then add an entry in `~/.hermes/config.yaml`. Use an absolute package path from a checkout.
+```bash
+git clone https://github.com/Shubhamsaboo/openclaw-vertexai-memorybank.git
+cd openclaw-vertexai-memorybank
+npm ci && npm run build
+```
+
+### 2. Configure Hermes with the checkout command
+
+Add an entry to `~/.hermes/config.yaml`, replacing the placeholder with the absolute path to this checkout. This `node` command is the primary installation path and works directly from a clone:
 
 ```yaml
 mcp_servers:
   agent_platform_memorybank:
-    command: "agent-platform-memorybank-hermes"
-    # For a checkout instead, use:
-    # command: "node"
-    # args: ["/absolute/path/openclaw-vertexai-memorybank/bin/hermes-mcp.js"]
+    command: "node"
+    args: ["/absolute/path/openclaw-vertexai-memorybank/bin/hermes-mcp.js"]
     env:
       MEMORYBANK_PROJECT_ID: "your-gcp-project-id"
       MEMORYBANK_LOCATION: "us-central1"
@@ -151,19 +157,13 @@ mcp_servers:
         - memorybank_stats
 ```
 
+Optionally, after building, run `npm link` in the checkout (or install the package globally) to put `agent-platform-memorybank-hermes` on your `PATH`. Only then may the configuration use `command: "agent-platform-memorybank-hermes"` instead of the `node` command and absolute script path above.
+
 Hermes supports `${ENV_VAR}` interpolation but deliberately filters stdio-child environments. Pass either an absolute `GOOGLE_APPLICATION_CREDENTIALS` service-account path or `HOME` for user ADC. Unresolved `${...}` values in required Memory Bank settings are rejected. Review and trust the command path before adding it.
 
-The `mcp_servers` key is user-chosen. This guide recommends `agent_platform_memorybank`, which produces `mcp__agent_platform_memorybank__memorybank_search`; choosing another key changes the `mcp__<key>__...` prefix. Local branch testers can keep their existing key. The allowlist limits discovery to these five tools; include mutating tools only where appropriate.
+The `mcp_servers` key is user-chosen. This guide recommends `agent_platform_memorybank`, which produces `mcp__agent_platform_memorybank__memorybank_search`; choosing another key changes the `mcp__<key>__...` prefix. The allowlist limits discovery to these five tools; include mutating tools only where appropriate.
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `MEMORYBANK_PROJECT_ID` | yes | Google Cloud project ID or number |
-| `MEMORYBANK_LOCATION` | yes | Agent Platform location |
-| `MEMORYBANK_REASONING_ENGINE_ID` | yes | reasoning engine identifier (required compatibility configuration name) |
-| `MEMORYBANK_SCOPE` | no | JSON scope; default `{"agent_name":"hermes"}` |
-| `MEMORYBANK_TOP_K` | no | similarity-search result count, integer 1–100 |
-
-The Hermes default scope intentionally isolates this runtime. To share memory with OpenClaw, configure the identical `scope` object and `MEMORYBANK_SCOPE` value.
+### 3. Test and reload
 
 ```bash
 hermes mcp test agent_platform_memorybank
@@ -171,7 +171,7 @@ hermes mcp test agent_platform_memorybank
 
 Then use `/reload-mcp` in Hermes after configuration changes.
 
-### MCP tools
+## Hermes MCP tool surface
 
 - `memorybank_search(query, top_k?)`
 - `memorybank_remember(fact)`
@@ -181,7 +181,9 @@ Then use `/reload-mcp` in Hermes after configuration changes.
 
 Malformed JSON-RPC requests and invalid arguments receive protocol errors or clean `isError` responses; stack traces are not sent over stdout.
 
-## How It Works
+## How it works
+
+### OpenClaw lifecycle
 
 ```text
 User message arrives
@@ -197,20 +199,29 @@ User message arrives
   [agent_end]             For substantive turns, submit the last pair
   (auto-capture)          to GenerateMemories for extraction/consolidation
         |
+        v
   [agent_end]             Sync changed workspace memory files
   (file sync)             through GenerateMemories
 ```
 
-- **Recall** calls `RetrieveMemories` with semantic similarity search in the configured scope. Returned results are ordered from shortest to greatest Euclidean similarity distance. `maxDistance` is a plugin-side filter.
-- **Capture and file sync** call `GenerateMemories`. This extracts memories from source content and can consolidate generated facts with memories in the exact same scope.
+### Hermes explicit MCP flow
+
+Hermes does not register native lifecycle hooks. A Hermes user or agent explicitly calls an MCP tool: `memorybank_search` retrieves relevant facts, `memorybank_remember` writes a fact, and the remaining tools correct, forget, or inspect scoped memory.
+
+### Shared Memory Bank operations
+
+- **Recall/search** calls `RetrieveMemories` with semantic similarity search in the configured scope. Returned results are ordered from shortest to greatest Euclidean similarity distance. `maxDistance` is an OpenClaw plugin-side filter.
+- **OpenClaw capture and file sync** call `GenerateMemories`. This extracts memories from source content and can consolidate generated facts with memories in the exact same scope.
 - **Direct remember** calls `CreateMemory`. It writes the supplied fact immediately and can create duplicates until a later generation/consolidation run; it is not a `GenerateMemories` call.
-- **Noise filtering** skips capture when the user message is under 20 characters or the final message pair is under 100 characters.
-- **Topic sync** configures extraction topics, perspective, and examples on the reasoning engine.
+- **OpenClaw noise filtering** skips capture when the user message is under 20 characters or the final message pair is under 100 characters.
+- **OpenClaw topic sync** configures extraction topics, perspective, and examples on the reasoning engine.
 - Authentication uses ADC.
 
 For official details, see [generate memories](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank/generate-memories) and [fetch memories](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank/fetch-memories).
 
 ## Configuration
+
+### OpenClaw plugin options
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -230,7 +241,17 @@ For official details, see [generate memories](https://docs.cloud.google.com/gemi
 | `ttlSeconds` | number | none | **plugin configuration** mapped to generated-memory TTL settings; affects only generated memories, not direct `CreateMemory` remembers |
 | `introspection` | `"off"` \| `"scores"` | `"scores"` | **plugin presentation setting** for recalled context; not an official API field name |
 
-### Memory scoping
+### Hermes MCP environment variables
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `MEMORYBANK_PROJECT_ID` | yes | Google Cloud project ID or number |
+| `MEMORYBANK_LOCATION` | yes | Agent Platform location |
+| `MEMORYBANK_REASONING_ENGINE_ID` | yes | reasoning engine identifier (required compatibility configuration name) |
+| `MEMORYBANK_SCOPE` | no | JSON scope; default `{"agent_name":"hermes"}` |
+| `MEMORYBANK_TOP_K` | no | similarity-search result count, integer 1–100 |
+
+### Shared memory scoping
 
 Scope isolates memories and determines which memories are eligible for consolidation. It is a dictionary with these official constraints:
 
@@ -239,7 +260,7 @@ Scope isolates memories and determines which memories are eligible for consolida
 - Scope matching is exact and independent of key order.
 - Scope is immutable after a memory is created.
 
-Use a `user_id`-only scope for cross-agent sharing, or include an agent key for deliberate isolation:
+Use a `user_id`-only scope for cross-runtime sharing, or include an agent key for deliberate isolation:
 
 ```jsonc
 { "user_id": "shubham" }
@@ -247,19 +268,25 @@ Use a `user_id`-only scope for cross-agent sharing, or include an agent key for 
 { "user_id": "shubham", "agent_name": "openclaw" }
 ```
 
+The Hermes default scope intentionally isolates this runtime. To share memory with OpenClaw, configure the identical `scope` object and `MEMORYBANK_SCOPE` value.
+
 ## Memory profiles
 
-Agent Platform Memory Bank also supports structured **Memory Profiles**: one source-of-truth profile per schema and scope, maintained through the generation pipeline. This plugin currently handles natural-language memories only; it does not create, retrieve, or manage profile schemas. See the official [Memory Profiles guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank/profiles).
+Agent Platform Memory Bank also supports structured **Memory Profiles**: one source-of-truth profile per schema and scope, maintained through the generation pipeline. This implementation currently handles natural-language memories only; it does not create, retrieve, or manage profile schemas. See the official [Memory Profiles guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank/profiles).
 
-## Default topics, examples, and recall presentation
+## OpenClaw plugin defaults: topics, examples, and recall presentation
 
-Unless `memoryTopics` is overridden, the plugin configures managed `USER_PREFERENCES`, `EXPLICIT_INSTRUCTIONS`, and `KEY_CONVERSATION_DETAILS` topics plus custom `technical_decisions`, `project_context`, and `action_items` topics. Built-in few-shot examples teach generation to retain decisions and preferences while ignoring short acknowledgments and transient debugging chatter.
+Unless `memoryTopics` is overridden, the OpenClaw plugin configures managed `USER_PREFERENCES`, `EXPLICIT_INSTRUCTIONS`, and `KEY_CONVERSATION_DETAILS` topics plus custom `technical_decisions`, `project_context`, and `action_items` topics. Built-in few-shot examples teach generation to retain decisions and preferences while ignoring short acknowledgments and transient debugging chatter.
 
-`introspection` controls the plugin's recalled-context presentation: `scores` (the default) includes the returned similarity distance alongside each fact; `off` injects facts only. It does not change the Memory Bank API response.
+`introspection` controls the OpenClaw plugin's recalled-context presentation: `scores` (the default) includes the returned similarity distance alongside each fact; `off` injects facts only. It does not change the Memory Bank API response.
 
-`GenerateMemories` does not propagate caller metadata to generated memories in this implementation. Metadata is available to direct create/update calls; tagging generated results would require a later list-and-patch step, which this plugin does not implement.
+`GenerateMemories` does not propagate caller metadata to generated memories in this implementation. Metadata is available to direct create/update calls; tagging generated results would require a later list-and-patch step, which this implementation does not perform.
 
-## OpenClaw agent tools
+## OpenClaw plugin surface
+
+The OpenClaw plugin runs alongside OpenClaw's built-in `memory-core` and adds cloud-backed long-term memory.
+
+### Agent tools
 
 These four tools are registered for the OpenClaw agent:
 
@@ -270,9 +297,9 @@ These four tools are registered for the OpenClaw agent:
 | `memorybank_correct` | updates a fact, with a delete-and-regenerate fallback that attempts to restore the old direct memory on failure |
 | `memorybank_stats` | returns a scoped count and topic breakdown |
 
-## OpenClaw CLI commands
+### CLI commands
 
-The actual CLI commands are distinct from agent tools:
+The actual OpenClaw CLI commands are distinct from agent tools:
 
 | Command | Options / behavior |
 | --- | --- |
@@ -308,7 +335,6 @@ Pricing and free-tier terms can change; use the canonical [Gemini Enterprise Age
 
 ```bash
 npm ci
-npm run render:architecture
 npm run build
 npm test
 npm pack --dry-run
