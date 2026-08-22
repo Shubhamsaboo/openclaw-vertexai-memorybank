@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-labelledby="diagram-title diagram-desc">
-      <title id="diagram-title">OpenClaw, Hermes, and Vertex AI Memory Bank architecture</title>
-      <desc id="diagram-desc">OpenClaw connects through a native plugin with automatic recall, capture, file sync, CLI and agent tools. Hermes connects through user-invoked MCP tools over standard input and output, without automatic hooks. Matching explicit scopes let both runtimes share Vertex AI Memory Bank operations.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="diagram-title diagram-desc">
+      <title id="diagram-title">OpenClaw, Hermes, and Agent Platform Memory Bank architecture</title>
+      <desc id="diagram-desc">OpenClaw connects through a native plugin with automatic recall, capture, file sync, CLI and agent tools. Hermes connects through user-invoked MCP tools over standard input and output, without automatic hooks. Matching explicit scopes let both runtimes share Agent Platform Memory Bank operations.</desc>
       <defs>
 <style><![CDATA[
     *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#070b18}body{display:grid;place-items:center;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}.frame{width:min(100vw,1600px);aspect-ratio:8/5}.frame svg{display:block;width:100%;height:100%}.title{font-size:38px;font-weight:720;letter-spacing:-.7px;fill:#f5f8ff}.subtitle{font-size:15px;font-weight:520;letter-spacing:1.7px;fill:#8493ad}.panel-title{font-size:25px;font-weight:700;fill:#f8faff}.panel-kicker{font-size:12px;font-weight:750;letter-spacing:1.5px}.card-title{font-size:16px;font-weight:700;fill:#edf2ff}.body{font-size:13px;font-weight:500;fill:#aebbd0}.mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:12px;font-weight:600}.small{font-size:11px;font-weight:650;letter-spacing:.8px}.line{fill:none;stroke-linecap:round;stroke-linejoin:round}.node{filter:url(#shadow)}
@@ -10,7 +10,7 @@
         <linearGradient id="coralPanel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2b1722"/><stop offset="1" stop-color="#121328"/></linearGradient>
         <linearGradient id="bluePanel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#101d36"/><stop offset="1" stop-color="#111329"/></linearGradient>
         <linearGradient id="corePanel" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#10233b"/><stop offset=".5" stop-color="#102b43"/><stop offset="1" stop-color="#10233b"/></linearGradient>
-        <linearGradient id="vertexPanel" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#173b68"/><stop offset=".5" stop-color="#1b5da1"/><stop offset="1" stop-color="#173b68"/></linearGradient>
+        <linearGradient id="agentPlatformPanel" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#173b68"/><stop offset=".5" stop-color="#1b5da1"/><stop offset="1" stop-color="#173b68"/></linearGradient>
         <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse"><path d="M44 0H0V44" fill="none" stroke="#6f83a8" stroke-opacity=".045" stroke-width="1"/></pattern>
         <filter id="shadow" x="-25%" y="-25%" width="150%" height="150%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity=".38"/></filter>
         <filter id="coralGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -27,7 +27,7 @@
 
       <g data-component-id="diagram-heading">
         <text x="800" y="58" text-anchor="middle" class="title">One memory layer. Two deliberate integrations.</text>
-        <text x="800" y="88" text-anchor="middle" class="subtitle">OPENCLAW + HERMES AGENT · VERTEX AI MEMORY BANK</text>
+        <text x="800" y="88" text-anchor="middle" class="subtitle">OPENCLAW + HERMES AGENT · AGENT PLATFORM MEMORY BANK</text>
       </g>
 
       <g data-component-id="openclaw-native-plugin" aria-label="OpenClaw native plugin architecture">
@@ -62,9 +62,9 @@
         </g>
         <g data-component-id="openclaw-tools">
           <rect x="423" y="386" width="304" height="158" rx="15" fill="#11162a" stroke="#ff756f" stroke-opacity=".32"/>
-          <text x="451" y="425" class="card-title">CLI + agent tools</text>
-          <text x="451" y="455" class="body">search · remember · forget</text>
-          <text x="451" y="482" class="body">correct · list · stats · sync</text>
+          <text x="451" y="425" class="card-title">OpenClaw access</text>
+          <text x="451" y="455" class="body">Agent: search · forget · correct · stats</text>
+          <text x="451" y="482" class="body">CLI: status · search · list · sync · remember · forget</text>
           <rect x="451" y="507" width="114" height="20" rx="10" fill="#ff6e68" opacity=".1"/><text x="508" y="521" text-anchor="middle" class="small" fill="#ffaaa5">MANUAL ACCESS</text>
         </g>
       </g>
@@ -120,11 +120,11 @@
         <text x="1078" y="712" class="mono" fill="#7ed9ef">{"user_id":"…"}</text>
       </g>
 
-      <g data-component-id="shared-memory-core" aria-label="Shared Vertex AI Memory Bank operations">
+      <g data-component-id="shared-memory-core" aria-label="Shared Agent Platform Memory Bank operations">
         <rect class="node" x="186" y="776" width="1228" height="116" rx="20" fill="url(#corePanel)" stroke="#65d1e9" stroke-opacity=".65" stroke-width="1.5"/>
         <circle cx="222" cy="817" r="8" fill="#68d7ed" filter="url(#blueGlow)"/>
         <text x="246" y="811" class="panel-kicker" fill="#7eddf0">SHARED CORE</text>
-        <text x="246" y="842" class="panel-title">Vertex AI Memory Bank operations</text>
+        <text x="246" y="842" class="panel-title">Agent Platform Memory Bank operations</text>
         <text x="246" y="869" class="body">Validated config · endpoint-keyed client reuse</text>
         <g transform="translate(774 803)">
           <rect width="110" height="34" rx="17" fill="#68d5ed" opacity=".1"/><text x="55" y="22" text-anchor="middle" class="small" fill="#8fe4f3">SEARCH</text>
@@ -137,9 +137,9 @@
       </g>
 
       <path d="M800 892v29" class="line" stroke="#72d8ee" stroke-width="2.5" marker-end="url(#arrowCore)"/>
-      <g data-component-id="vertex-ai-service" aria-label="Google Cloud Vertex AI Memory Bank service">
-        <rect x="414" y="927" width="772" height="53" rx="18" fill="url(#vertexPanel)" stroke="#6bbcff" stroke-opacity=".7"/>
-        <text x="800" y="950" text-anchor="middle" class="card-title">Vertex AI Memory Bank · Agent Engine</text>
+      <g data-component-id="agent-platform-service" aria-label="Google Cloud Agent Platform Memory Bank service">
+        <rect x="414" y="927" width="772" height="53" rx="18" fill="url(#agentPlatformPanel)" stroke="#6bbcff" stroke-opacity=".7"/>
+        <text x="800" y="950" text-anchor="middle" class="card-title">Agent Platform Memory Bank · Google Cloud</text>
         <text x="800" y="970" text-anchor="middle" class="small" fill="#a8d8ff">GOOGLE CLOUD SDK · APPLICATION DEFAULT CREDENTIALS</text>
       </g>
     </svg>

@@ -1,47 +1,50 @@
 # openclaw-vertexai-memorybank
 
-Managed long-term memory for OpenClaw and Hermes Agent, powered by [Vertex AI Memory Bank](https://docs.cloud.google.com/agent-builder/agent-engine/memory-bank/overview).
+Managed long-term memory for OpenClaw and Hermes Agent, powered by [Agent Platform Memory Bank on Google Cloud](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank). The repository, npm package, and OpenClaw plugin retain the legacy `openclaw-vertexai-memorybank` identifier for compatibility; it is not the current product name.
 
 ### Why you need memory beyond OpenClaw core
 
-OpenClaw's built-in memory is per-agent and per-session. This plugin adds **user-scoped memory that works across all your agents**, so when you tell one agent your preferences, every agent remembers. Scope by user, by project, or however you want. Your agent's memory compounds over time, not resets with each session.
+OpenClaw's built-in memory is per-agent and per-session. This plugin adds **user-scoped memory that can work across agents**, so preferences, decisions, and context can persist across sessions. Scope by user, project, or another deliberate isolation boundary.
 
-### Why Vertex AI Memory Bank
+### Why Agent Platform Memory Bank
 
-Fully managed with no vector database to run, no embeddings to maintain, no infrastructure to monitor. Your data stays in your GCP project, private by default. Generous free tier (1,000 retrievals/month free). The extraction and consolidation LLM handles deduplication, contradiction resolution, and fact merging automatically.
+Agent Platform Memory Bank is managed on Google Cloud: no vector database to run and no embeddings infrastructure to maintain. It generates and retrieves long-term memories within your Google Cloud project. Generated memories can be consolidated against existing memories in their exact scope.
 
 ### Token-efficient and effective
 
-Memories are extracted facts, not raw conversation logs. Only relevant memories are injected per turn via similarity search, not your entire history. The result: your agent gets better context in fewer tokens.
+Memories are extracted facts, not raw conversation logs. Before an OpenClaw turn, the plugin retrieves only relevant memories with similarity search rather than injecting an entire history.
 
 ---
 
 ![Architecture](architecture.jpg)
 
-> **Diagram source:** [`architecture.svg`](architecture.svg). Regenerate `architecture.jpg` after diagram changes with a browser SVG screenshot (for example, headless Chromium) followed by PNG-to-JPEG conversion; the rendered JPEG is included for npm/GitHub consumers.
+> **Diagram source:** [`architecture.svg`](architecture.svg). Regenerate the included 1600×1000 JPEG directly from the SVG (no browser screenshot) with `npm run render:architecture`.
 
-> **Disclaimer**: This is **not** an officially supported Google product.
+> **Disclaimer:** This is not an officially supported Google product.
 
 ## What It Does
 
-This plugin gives your OpenClaw agent **persistent, cross-session memory** using Vertex AI Memory Bank:
+This plugin gives an OpenClaw agent persistent, cross-session memory using Agent Platform Memory Bank:
 
-- **Auto-recall**: Before each turn, relevant memories are retrieved via similarity search and injected into context
-- **Auto-capture**: After each turn, the last message pair is sent to Memory Bank for fact extraction and storage
-- **Noise filtering**: Short/trivial exchanges are automatically skipped. Few-shot examples teach Memory Bank what to extract vs ignore
-- **Relevance threshold**: Low-similarity memories are filtered out before injection, keeping context clean
-- **File sync**: Workspace files (MEMORY.md, USER.md, SOUL.md, etc.) are automatically synced to Memory Bank with hash-based change tracking
-- **Topic sync**: Memory topics, perspective, and few-shot examples are auto-configured on the Agent Engine instance at startup
-- **Agent tools**: Search, forget, correct, and inspect memory stats directly from conversation
-- **CLI tools**: Search, create (via consolidation pipeline), and delete memories directly from the command line
-- **Managed infrastructure**: No vector DB, no local database. Vertex AI Memory Bank handles storage, embeddings, extraction, and retrieval
+- **Auto-recall:** retrieves relevant memories before each turn and injects them into context
+- **Auto-capture:** sends the last substantive message pair for extraction after each turn
+- **Noise filtering:** skips short or trivial exchanges before generation
+- **Relevance threshold:** optionally filters retrieval results by similarity distance
+- **File sync:** sends changed workspace memory files for generation with hash-based change tracking
+- **Topic sync:** configures topics, perspective, and few-shot examples on the reasoning engine
+- **Agent tools and CLI commands:** provide the runtime-specific operations documented below
+- **Hermes MCP server:** exposes explicit MCP tools over stdio; it has no OpenClaw lifecycle hooks
 
-> **Note:** This plugin runs _alongside_ OpenClaw's built-in `memory-core`. It adds cloud-backed long-term memory on top.
+> **Note:** This plugin runs alongside OpenClaw's built-in `memory-core`; it adds cloud-backed long-term memory.
 
 ## Prerequisites
 
-1. **Google Cloud project** with billing enabled and Vertex AI API enabled
-2. **Agent Engine instance** created for Memory Bank:
+1. A **Google Cloud project with billing enabled** and the **Agent Platform API** enabled. Enabling services requires `serviceusage.services.enable`, normally through `roles/serviceusage.serviceUsageAdmin` (or a broader role).
+2. IAM roles for the identity that runs the plugin:
+   - `roles/aiplatform.user` to create or update a Memory Bank instance.
+   - `roles/aiplatform.memoryUser` to read, write, and generate memories.
+   Use narrower Memory Bank viewer/editor roles where appropriate.
+3. A reasoning engine / Memory Bank instance. The following compatibility SDK identifiers remain required by the current API surface:
    ```bash
    pip install google-cloud-aiplatform>=1.111.0
    ```
@@ -51,16 +54,18 @@ This plugin gives your OpenClaw agent **persistent, cross-session memory** using
    agent_engine = client.agent_engines.create()
    print(agent_engine.api_resource.name)  # Save the reasoning engine ID
    ```
-3. **gcloud CLI** authenticated:
+4. Application Default Credentials (ADC), for example:
    ```bash
    gcloud auth application-default login
    ```
+
+See the official [setup guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank/setup) and [API quickstart](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank/api-quickstart).
 
 ## Installation
 
 ### 1. Add plugin config to `openclaw.json`
 
-Add the config **before** installing the plugin. It requires three fields to validate during install:
+Add configuration before installing the plugin so it can validate the required fields:
 
 ```json
 {
@@ -84,64 +89,57 @@ Add the config **before** installing the plugin. It requires three fields to val
 ```bash
 git clone https://github.com/Shubhamsaboo/openclaw-vertexai-memorybank.git
 cd openclaw-vertexai-memorybank
-npm install && npm run build
+npm ci && npm run build
 openclaw plugins install .
 ```
 
-### 3. Add to allowlist (recommended)
-
-After install, add `plugins.allow` to your `openclaw.json` to explicitly trust the plugin and silence the "non-bundled plugin auto-load" warning:
+### 3. Add to the allowlist (recommended)
 
 ```json
 {
   "plugins": {
     "allow": ["openclaw-vertexai-memorybank"],
-    "entries": { ... }
+    "entries": { "...": "..." }
   }
 }
 ```
 
-> **Why not add `allow` in step 1?** Because OpenClaw checks that allowed plugins are already installed. If you add it before installing, you'll get a validation error.
+The legacy plugin ID above is intentionally retained as a compatibility identifier. Add it after installation because OpenClaw validates allowlisted plugins.
 
-### 4. Restart
+### 4. Restart OpenClaw
 
 ```bash
 openclaw restart
 ```
 
-The plugin loads on gateway startup, so a restart is required after install.
-
 ### Bootstrapping from existing sessions
 
-After install, your agent starts with an empty memory. To catch up on context from past conversations, ask your agent:
-
-> *"Generate memories from my last few days of sessions."*
-
-The agent can parse your session history and backfill Memory Bank with extracted facts. This gives you immediate value and your agent will recall decisions, preferences, and context from recent work without waiting for new conversations to build up memory organically.
+After installation, ask the agent to generate memories from selected prior sessions. The agent can parse that history and submit it for extraction; review scope and source content before backfilling.
 
 ## Hermes Agent (MCP)
 
-The package also provides a dedicated MCP JSON-RPC-over-stdio server for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It is separate from the OpenClaw plugin: MCP responses are the only data written to stdout; diagnostics go to stderr.
+The package provides a dedicated MCP JSON-RPC-over-stdio server for [Hermes Agent](https://github.com/NousResearch/hermes-agent). Hermes support exists only in this unmerged PR, so no executable migration or compatibility alias is needed: install and use `agent-platform-memorybank-hermes`. MCP responses are written only to stdout and diagnostics only to stderr.
 
 ### Install and configure
 
-Build or install the package, then add this entry to `~/.hermes/config.yaml` (Hermes reads stdio servers from `mcp_servers`). Use an absolute package path when using a checkout.
+Build or install the package, then add an entry in `~/.hermes/config.yaml`. Use an absolute package path from a checkout.
 
 ```yaml
 mcp_servers:
-  vertex_memorybank:
-    command: "node"
-    args: ["/absolute/path/openclaw-vertexai-memorybank/bin/hermes-mcp.js"]
+  agent_platform_memorybank:
+    command: "agent-platform-memorybank-hermes"
+    # For a checkout instead, use:
+    # command: "node"
+    # args: ["/absolute/path/openclaw-vertexai-memorybank/bin/hermes-mcp.js"]
     env:
       MEMORYBANK_PROJECT_ID: "your-gcp-project-id"
       MEMORYBANK_LOCATION: "us-central1"
       MEMORYBANK_REASONING_ENGINE_ID: "your-reasoning-engine-id"
       # Hermes filters the stdio child environment. Pass service-account ADC explicitly.
       GOOGLE_APPLICATION_CREDENTIALS: "/absolute/path/service-account.json"
-      # Alternative to GOOGLE_APPLICATION_CREDENTIALS for user ADC created by
-      # `gcloud auth application-default login`:
+      # Or use user ADC created by `gcloud auth application-default login`:
       # HOME: "${HOME}"
-      # Explicitly match OpenClaw's scope to enable cross-runtime sharing.
+      # Match OpenClaw's scope exactly to enable sharing.
       MEMORYBANK_SCOPE: '{"user_id":"your-user-id"}'
     trust: untrusted
     tools:
@@ -153,31 +151,25 @@ mcp_servers:
         - memorybank_stats
 ```
 
-Hermes supports `${ENV_VAR}` interpolation in MCP config. It deliberately filters the environment of stdio children, so ADC must be deliberate: pass an absolute `GOOGLE_APPLICATION_CREDENTIALS` service-account JSON path, **or** pass `HOME` for user ADC created by `gcloud auth application-default login`. Do not use both unless that precedence is intended. An unset Hermes interpolation stays literal; this server rejects unresolved `${...}` values for required Memory Bank settings. Review and trust the command path before adding it. `trust: untrusted` asks Hermes to require approval for tools that are not marked read-only. Hermes records this stdio server's stderr at `~/.hermes/logs/mcp-stderr.log`.
+Hermes supports `${ENV_VAR}` interpolation but deliberately filters stdio-child environments. Pass either an absolute `GOOGLE_APPLICATION_CREDENTIALS` service-account path or `HOME` for user ADC. Unresolved `${...}` values in required Memory Bank settings are rejected. Review and trust the command path before adding it.
 
-The tools appear in Hermes as `mcp__vertex_memorybank__memorybank_search` and similarly for the remaining tools. The recommended `tools.include` allow-list limits discovery to the five Memory Bank tools above; include mutating tools only when they are appropriate for the profile.
-
-The server requires these explicit environment variables:
+The `mcp_servers` key is user-chosen. This guide recommends `agent_platform_memorybank`, which produces `mcp__agent_platform_memorybank__memorybank_search`; choosing another key changes the `mcp__<key>__...` prefix. Local branch testers can keep their existing key. The allowlist limits discovery to these five tools; include mutating tools only where appropriate.
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `MEMORYBANK_PROJECT_ID` | yes | GCP project ID or number |
-| `MEMORYBANK_LOCATION` | yes | Vertex AI region |
-| `MEMORYBANK_REASONING_ENGINE_ID` | yes | Agent Engine reasoning engine ID |
-| `MEMORYBANK_SCOPE` | no | JSON object scope; default is `{"agent_name":"hermes"}` |
-| `MEMORYBANK_TOP_K` | no | Search result count, integer 1–100 |
+| `MEMORYBANK_PROJECT_ID` | yes | Google Cloud project ID or number |
+| `MEMORYBANK_LOCATION` | yes | Agent Platform location |
+| `MEMORYBANK_REASONING_ENGINE_ID` | yes | reasoning engine identifier (required compatibility configuration name) |
+| `MEMORYBANK_SCOPE` | no | JSON scope; default `{"agent_name":"hermes"}` |
+| `MEMORYBANK_TOP_K` | no | similarity-search result count, integer 1–100 |
 
-The Hermes default scope isolates this runtime. To share memory with OpenClaw, explicitly configure **the identical `scope` object** in OpenClaw and `MEMORYBANK_SCOPE` (for example, `{ "user_id": "your-user-id" }`). Scope matching is exact.
-
-After editing the config, test the server and reload MCP tools:
+The Hermes default scope intentionally isolates this runtime. To share memory with OpenClaw, configure the identical `scope` object and `MEMORYBANK_SCOPE` value.
 
 ```bash
-hermes mcp test vertex_memorybank
+hermes mcp test agent_platform_memorybank
 ```
 
-```text
-/reload-mcp
-```
+Then use `/reload-mcp` in Hermes after configuration changes.
 
 ### MCP tools
 
@@ -187,185 +179,139 @@ hermes mcp test vertex_memorybank
 - `memorybank_correct(memory_id, new_fact)`
 - `memorybank_stats()`
 
-Malformed JSON-RPC requests and invalid tool arguments return protocol errors or a clean `isError` tool response; no stack traces are sent through the protocol.
+Malformed JSON-RPC requests and invalid arguments receive protocol errors or clean `isError` responses; stack traces are not sent over stdout.
 
 ## How It Works
 
-```
+```text
 User message arrives
         |
         v
-  [before_agent_start]    Retrieve top-K memories via similarity search,
-  (auto-recall)           filter by relevance threshold,
-                          prepend to agent context
+  [before_agent_start]    Retrieve top-K memories by similarity,
+  (auto-recall)           optionally filter by distance, inject context
         |
         v
-   Agent processes
-   the message
+   Agent processes message
         |
         v
-  [agent_end]             Check message length (noise filter)
-  (auto-capture)          If substantive: send last message pair
-                          to Memory Bank for extraction
+  [agent_end]             For substantive turns, submit the last pair
+  (auto-capture)          to GenerateMemories for extraction/consolidation
         |
-  [agent_end]             Scan workspace files for changes
-  (file sync)             and sync changed files to Memory Bank
+  [agent_end]             Sync changed workspace memory files
+  (file sync)             through GenerateMemories
 ```
 
-- **Recall** uses semantic similarity search scoped to your configured scope. Optional `maxDistance` threshold filters out low-relevance results
-- **Capture** sends only the last user+assistant message pair (not the full conversation), so each turn is processed exactly once with zero overlap
-- **Noise filter** skips capture when user message < 20 chars or total < 100 chars (filters "done?", "?", "ok" type exchanges)
-- **Few-shot examples** teach Memory Bank's extraction LLM what to capture (decisions, preferences) and what to ignore (status checks, debugging chatter)
-- **File sync** tracks SHA-256 hashes of workspace files and only re-syncs when content changes
-- **Topic sync** auto-configures memory topics, perspective, and few-shot examples on the Agent Engine instance at startup
-- **Consolidation** is handled by Memory Bank for generated writes. Conversation capture and file sync use `GenerateMemories` with `direct_contents_source`; direct `memorybank-remember` uses the Memory Bank `CreateMemory` API to store the supplied fact immediately. Generated memories can be deduplicated, updated, or removed by Memory Bank within their exact scope.
-- Authentication uses Google Application Default Credentials (ADC)
+- **Recall** calls `RetrieveMemories` with semantic similarity search in the configured scope. Returned results are ordered from shortest to greatest Euclidean similarity distance. `maxDistance` is a plugin-side filter.
+- **Capture and file sync** call `GenerateMemories`. This extracts memories from source content and can consolidate generated facts with memories in the exact same scope.
+- **Direct remember** calls `CreateMemory`. It writes the supplied fact immediately and can create duplicates until a later generation/consolidation run; it is not a `GenerateMemories` call.
+- **Noise filtering** skips capture when the user message is under 20 characters or the final message pair is under 100 characters.
+- **Topic sync** configures extraction topics, perspective, and examples on the reasoning engine.
+- Authentication uses ADC.
+
+For official details, see [generate memories](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank/generate-memories) and [fetch memories](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank/fetch-memories).
 
 ## Configuration
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `projectId` | string | **(required)** | GCP project ID or number |
-| `location` | string | **(required)** | GCP region (e.g. `us-central1`) |
-| `reasoningEngineId` | string | **(required)** | Agent Engine reasoning engine ID |
-| `scope` | object | `{"agent_name": "openclaw"}` | Memory scope for isolation. Exact-match on all keys. See [Memory Scoping](#memory-scoping) |
-| `autoRecall` | boolean | `true` | Retrieve memories before each turn |
-| `autoCapture` | boolean | `true` | Extract memories after each turn |
-| `autoSyncFiles` | boolean | `true` | Sync workspace markdown files |
-| `autoSyncTopics` | boolean | `true` | Auto-configure topics on startup |
-| `memoryTopics` | array | (see below) | Custom memory topics |
-| `perspective` | `"first"` \| `"third"` | `"third"` | Memory perspective |
-| `topK` | number | `10` | Max memories per query |
-| `maxDistance` | number | none | Max similarity distance for recall. Lower = stricter. Memories above this are filtered out |
-| `backgroundGenerate` | boolean | `true` | Non-blocking file sync (capture is always async) |
-| `ttlSeconds` | number | none | Auto-expire memories (seconds). Default: no expiry |
-| `introspection` | `"off"` \| `"scores"` | `"scores"` | Metadata in auto-recalled memories. `"off"` = just facts, `"scores"` = facts + similarity score |
+| --- | --- | --- | --- |
+| `projectId` | string | **required** | Google Cloud project ID or number |
+| `location` | string | **required** | Google Cloud region, for example `us-central1` |
+| `reasoningEngineId` | string | **required** | reasoning engine ID; retained API/config identifier |
+| `scope` | object | `{"agent_name":"openclaw"}` | immutable Memory Bank scope; exact matching regardless of key order |
+| `autoRecall` | boolean | `true` | retrieve memories before each turn |
+| `autoCapture` | boolean | `true` | generate memories after each turn |
+| `autoSyncFiles` | boolean | `true` | generate memories from changed workspace markdown files |
+| `autoSyncTopics` | boolean | `true` | configure extraction topics on startup |
+| `memoryTopics` | array | built-in topics | custom memory topics |
+| `perspective` | `"first"` \| `"third"` | `"third"` | generation perspective |
+| `topK` | number | `10` | maximum similarity-search results |
+| `maxDistance` | number | none | plugin-side maximum similarity distance; lower is stricter |
+| `backgroundGenerate` | boolean | `true` | fire-and-forget capture/file generation; `true` does **not** wait for completion |
+| `ttlSeconds` | number | none | **plugin configuration** mapped to generated-memory TTL settings; affects only generated memories, not direct `CreateMemory` remembers |
+| `introspection` | `"off"` \| `"scores"` | `"scores"` | **plugin presentation setting** for recalled context; not an official API field name |
 
-### Default Memory Topics
+### Memory scoping
 
-The plugin configures six topics by default (3 managed + 3 custom):
+Scope isolates memories and determines which memories are eligible for consolidation. It is a dictionary with these official constraints:
 
-**Managed:** USER_PREFERENCES, EXPLICIT_INSTRUCTIONS, KEY_CONVERSATION_DETAILS
+- At most **five** key/value pairs.
+- Values cannot contain `*`.
+- Scope matching is exact and independent of key order.
+- Scope is immutable after a memory is created.
 
-**Custom:**
-- `technical_decisions`: Architecture choices, tool evaluations, technology selections
-- `project_context`: Project names, repos, team members, roles, configurations
-- `action_items`: Tasks, deadlines, commitments, follow-ups
-
-Each custom topic includes "Do NOT include" clauses to reduce noise (e.g., routine status checks, temporary error messages).
-
-### Few-Shot Examples
-
-The plugin ships with built-in few-shot examples that teach Memory Bank's extraction LLM:
-
-- **What to capture**: User preferences, explicit instructions, architecture decisions
-- **What to skip**: Short status checks ("done?"), debugging chatter, operational acknowledgments
-
-You can override these by providing your own `memoryTopics` array with custom few-shot examples.
-
-### Memory Scoping
-
-The `scope` field controls memory isolation. It's an arbitrary key-value object where you define the keys. **Scope matching is exact**: memories are only returned when all scope keys match exactly, and consolidation (dedup, contradiction resolution) only happens within the same scope.
-
-This means scope determines both **who can see** a memory and **what gets merged together**.
-
-**Recommended: scope by `user_id` only** for cross-agent memory sharing:
+Use a `user_id`-only scope for cross-agent sharing, or include an agent key for deliberate isolation:
 
 ```jsonc
-// Recommended: shared across all agents for the same user
 { "user_id": "shubham" }
-
-// Per-agent (memories won't be shared between agents)
-{ "agent_name": "openclaw" }
-
-// Per-user + per-agent (most isolated)
+// or
 { "user_id": "shubham", "agent_name": "openclaw" }
 ```
 
-> **Tip:** If you scope as `{user_id: "alan", agent_name: "zaf"}`, memories created by agent "zaf" won't be found by agent "helper" for the same user. Use `user_id`-only scoping unless you specifically want agent isolation.
+## Memory profiles
 
-Scope is **immutable** once set on a memory, so choose your scoping strategy before backfilling. See the [Memory Bank scoping documentation](https://docs.cloud.google.com/agent-builder/agent-engine/memory-bank/overview#memory-scope) for more details.
+Agent Platform Memory Bank also supports structured **Memory Profiles**: one source-of-truth profile per schema and scope, maintained through the generation pipeline. This plugin currently handles natural-language memories only; it does not create, retrieve, or manage profile schemas. See the official [Memory Profiles guide](https://docs.cloud.google.com/gemini-enterprise-agent-platform/scale/memory-bank/profiles).
 
-## Agent Tools
+## Default topics, examples, and recall presentation
 
-The plugin registers four tools that the agent can call directly during conversation:
+Unless `memoryTopics` is overridden, the plugin configures managed `USER_PREFERENCES`, `EXPLICIT_INSTRUCTIONS`, and `KEY_CONVERSATION_DETAILS` topics plus custom `technical_decisions`, `project_context`, and `action_items` topics. Built-in few-shot examples teach generation to retain decisions and preferences while ignoring short acknowledgments and transient debugging chatter.
 
-| Tool | Description |
-|------|-------------|
-| `memorybank_search` | Semantic search that returns facts with similarity scores, topics, timestamps, and memory IDs |
-| `memorybank_forget` | Delete a specific memory by ID. Useful when the agent discovers outdated or incorrect information |
-| `memorybank_correct` | Update a memory fact with `updateMemory`. When that API is unavailable, it fetches the old fact, deletes, and regenerates; a failed regeneration attempts to restore the old fact and returns any replacement/restored resource name. |
-| `memorybank_stats` | Total memory count, breakdown by topic, and scope info. Uses lightweight field-masked counting |
+`introspection` controls the plugin's recalled-context presentation: `scores` (the default) includes the returned similarity distance alongside each fact; `off` injects facts only. It does not change the Memory Bank API response.
 
-These use `api.registerTool()` and are available to the agent automatically when the plugin is enabled.
+`GenerateMemories` does not propagate caller metadata to generated memories in this implementation. Metadata is available to direct create/update calls; tagging generated results would require a later list-and-patch step, which this plugin does not implement.
 
-**Example interaction:** *"What do you remember about my deployment setup?"* → agent calls `memorybank_search` with that query and gets back ranked results with scores. *"That's wrong, I moved to us-east1"* → agent calls `memorybank_correct` to fix it.
+## OpenClaw agent tools
 
-### Introspection
+These four tools are registered for the OpenClaw agent:
 
-The `introspection` config controls what metadata appears in auto-recalled memories:
+| Tool | Behavior |
+| --- | --- |
+| `memorybank_search` | `RetrieveMemories` similarity search; returns facts, similarity distance, topics, timestamps, and IDs |
+| `memorybank_forget` | deletes one memory by ID or resource name |
+| `memorybank_correct` | updates a fact, with a delete-and-regenerate fallback that attempts to restore the old direct memory on failure |
+| `memorybank_stats` | returns a scoped count and topic breakdown |
 
-- **`"scores"` (default)**: Each memory includes its similarity score, helping the agent weigh relevance
-- **`"off"`**: Just the facts, no metadata. Use for token-conscious setups
+## OpenClaw CLI commands
 
-## CLI Commands
+The actual CLI commands are distinct from agent tools:
 
-### `memorybank-status`
-Show plugin config, connection status, and file sync state.
+| Command | Options / behavior |
+| --- | --- |
+| `memorybank-status` | displays plugin configuration, connection state, and tracked-file state; refreshes the scoped count |
+| `memorybank-search <query>` | `--top-k N`, `--show-ids`; similarity search with returned distances |
+| `memorybank-list` | `--count-only`, `--show-ids`; paginated scoped listing or lightweight count |
+| `memorybank-sync` | synchronizes changed workspace memory files |
+| `memorybank-remember <fact>` | direct `CreateMemory` write; duplicates can persist until later generation consolidation |
+| `memorybank-forget <memoryId>` | deletes a memory; IDs come from search/list `--show-ids` |
 
-### `memorybank-search <query> [--top-k N] [--show-ids]`
-Search memories by semantic similarity. Shows distance scores. Use `--show-ids` to reveal memory IDs (needed for deletion).
-```bash
-openclaw memorybank-search "project architecture decisions" --top-k 5 --show-ids
-```
+The count cache is in-memory for five minutes and is adjusted after direct create/delete operations; count-only/status can force a fresh paginated count. `GetMemory` fetches one named memory, `RetrieveMemories` is for all-in-scope or similarity retrieval, and `ListMemories` enumerates memories with pagination.
 
-### `memorybank-list [--show-ids] [--count-only]`
-List all memories in the current scope. Use `--show-ids` to reveal memory IDs. Use `--count-only` for a fast, lightweight count using field-masked API calls (no full memory objects fetched).
+## Troubleshooting and security
 
-### `memorybank-remember <fact>`
-Store a fact via Memory Bank's consolidation pipeline (`GenerateMemories` with `direct_memories_source`). The fact goes through the same deduplication, contradiction resolution, and merging as conversation-captured memories, so it's never a raw insert. Useful for cron jobs, scripts, or seeding initial knowledge.
-```bash
-openclaw memorybank-remember "The deployment uses us-central1 region"
-```
+- Use ADC (`gcloud auth application-default login`) locally, or an explicit service-account path in Hermes. Never commit credential files.
+- Hermes runs the configured command as a local process. Review its absolute path and use `tools.include` to limit access, especially to `memorybank_forget` and `memorybank_correct`.
+- Use identical project, location, reasoning engine, and scope in Hermes and OpenClaw to share memories. Scope mismatches intentionally return separate memory sets.
+- Check stderr for `[memorybank]` diagnostics; stdout is MCP JSON-RPC only.
 
-### `memorybank-forget <memoryId>`
-Delete a specific memory by ID. Find IDs using `--show-ids` with search or list.
-```bash
-openclaw memorybank-search "wrong fact" --show-ids
-# 1. Some incorrect memory (id: 1234567890)
-
-openclaw memorybank-forget 1234567890
-```
-
-### `memorybank-sync`
-Manually trigger file sync (useful after bulk file edits).
+For more operational details and official-operation references, see [FAQ.md](FAQ.md).
 
 ## Pricing
 
-Vertex AI Memory Bank pricing (as of 2026):
+As of **2026-08-21**, the official pricing page says Agent Platform Memory Bank billing begins **September 1, 2026**:
 
-| Resource | Cost | Notes |
-|----------|------|-------|
-| **Memory storage** | $0.25 per 1,000 memories / month | Scales with memory count |
-| **Memory retrieval** | $0.50 per 1,000 memories returned | First 1,000/month **free** |
-| **Memory generation** | Gemini token costs only (~$0.0003-$0.001/call) | No per-call API fee |
+- **Agent Storage:** $0.000410959 per GiB-hour, with the first 1 GiB-month free.
+- **Agent Compute:** $0.085 per vCPU-hour. Memory Bank meters one vCPU-hour per 3 million reads and per 1 million writes; the first 50 vCPU-hours are free.
+- **Model generation and embedding tokens:** charged separately at the applicable model rates.
 
-**Example monthly cost (single user, ~50 turns/day):**
-- Storage: ~$0.25 (1K memories)
-- Retrieval: ~$7 (50 retrievals/day × 30 days, minus free tier)
-- Generation: ~$0.50 (capture + file syncs)
-- **Total: ~$8/month**
-
-For most personal/small-team usage, costs are minimal. Retrieval is the largest line item at scale, consider caching if you run multiple agents.
-
-See [Vertex AI pricing](https://cloud.google.com/vertex-ai/pricing#vertex-ai-agent-engine) and [FAQ.md](FAQ.md) for detailed cost breakdowns.
+Pricing and free-tier terms can change; use the canonical [Gemini Enterprise Agent Platform pricing page](https://cloud.google.com/products/gemini-enterprise-agent-platform/pricing), not repository cost estimates.
 
 ## Development
 
 ```bash
-npm install
+npm ci
+npm run render:architecture
 npm run build
-openclaw plugins install .
+npm test
+npm pack --dry-run
 ```
 
 ## License

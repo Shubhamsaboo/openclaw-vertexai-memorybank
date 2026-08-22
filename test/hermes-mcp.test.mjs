@@ -53,13 +53,13 @@ test("echoes all Hermes mcp_types handshake versions and counter-offers the late
   for (const protocolVersion of ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]) {
     const response = await request(handler, 1, "initialize", { protocolVersion });
     assert.equal(response.result.protocolVersion, protocolVersion);
-    assert.equal(response.result.serverInfo.name, "vertexai-memorybank");
+    assert.equal(response.result.serverInfo.name, "agent-platform-memorybank");
   }
   const counterOffer = await request(handler, 2, "initialize", { protocolVersion: "2099-01-01" });
   assert.equal(counterOffer.result.protocolVersion, "2025-11-25");
 });
 
-test("calls all memory tools through mocked Vertex client", async () => {
+test("calls all memory tools through the mocked Agent Platform client", async () => {
   const calls = [];
   const client = mockClient({
     retrieveMemories: async (input) => { calls.push(["search", input]); return [{ retrievedMemories: [] }]; },
@@ -148,7 +148,7 @@ test("validates JSON-RPC requests, arguments, and notification silence", async (
   assert.equal(await handler({ jsonrpc: "2.0", method: "not/a/method", params: {} }), undefined);
 });
 
-test("reuses Vertex clients only for the same endpoint", () => {
+test("reuses Agent Platform clients only for the same endpoint", () => {
   const created = [];
   setMemoryBankClientFactoryForTests((input) => {
     const client = mockClient();

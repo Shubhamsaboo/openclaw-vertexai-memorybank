@@ -27,7 +27,7 @@ const clients = new Map<string, MemoryBankClient>();
 let createClient = (cfg: MemoryBankConfig): MemoryBankClient =>
   new v1beta1.MemoryBankServiceClient({ apiEndpoint: `${cfg.location}-aiplatform.googleapis.com` }) as unknown as MemoryBankClient;
 
-/** Reuse SDK clients only for identical Vertex endpoints. */
+/** Reuse SDK clients only for identical Agent Platform API endpoints. */
 export function getMemoryBankClient(cfg: MemoryBankConfig): MemoryBankClient {
   const endpoint = `${cfg.location}-aiplatform.googleapis.com`;
   let client = clients.get(endpoint);

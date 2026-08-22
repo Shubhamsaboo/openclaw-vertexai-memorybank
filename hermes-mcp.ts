@@ -17,7 +17,7 @@ type ToolHandler = (arguments_: Record<string, unknown>) => Promise<unknown>;
 export const TOOL_DEFINITIONS = [
   {
     name: "memorybank_search",
-    description: "Search Vertex AI Memory Bank by semantic similarity.",
+    description: "Search Agent Platform Memory Bank by semantic similarity distance.",
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     inputSchema: {
       type: "object", additionalProperties: false,
@@ -27,7 +27,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: "memorybank_remember",
-    description: "Store a fact in Vertex AI Memory Bank.",
+    description: "Directly store a fact in Agent Platform Memory Bank; duplicates can persist until later generation consolidation.",
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     inputSchema: {
       type: "object", additionalProperties: false,
@@ -104,7 +104,7 @@ function installUnhandledRejectionHandler(): void {
   // handler: synchronous programmer errors must still terminate normally.
   process.on("unhandledRejection", (reason) => {
     const type = reason instanceof Error ? reason.name : typeof reason;
-    process.stderr.write(`[vertexai-memorybank] handled asynchronous dependency rejection (${type}); MCP server remains available.\n`);
+    process.stderr.write(`[memorybank] handled asynchronous dependency rejection (${type}); MCP server remains available.\n`);
   });
 }
 
@@ -152,7 +152,7 @@ export function createMcpRequestHandler(service: Pick<MemoryBankService, "search
       return isNotification ? undefined : result(request.id as Json, {
         protocolVersion,
         capabilities: { tools: {} },
-        serverInfo: { name: "vertexai-memorybank", version: SERVER_VERSION },
+        serverInfo: { name: "agent-platform-memorybank", version: SERVER_VERSION },
       });
     }
     if (request.method === "tools/list") {
@@ -192,7 +192,7 @@ export function runMcpServer(): void {
     // the same explicit JSON object in both runtimes to share memories.
     handler = createMcpRequestHandler(new MemoryBankService(hermesConfigFromEnv()));
   } catch (error: any) {
-    process.stderr.write(`[vertexai-memorybank] configuration error: ${error.message}\n`);
+    process.stderr.write(`[memorybank] configuration error: ${error.message}\n`);
     process.exitCode = 1;
     return;
   }
@@ -211,7 +211,7 @@ export function runMcpServer(): void {
       const response = await handler(request);
       if (response) process.stdout.write(`${JSON.stringify(response)}\n`);
     } catch (error: any) {
-      process.stderr.write(`[vertexai-memorybank] internal MCP error: ${error?.message || error}\n`);
+      process.stderr.write(`[memorybank] internal MCP error: ${error?.message || error}\n`);
       if (request.id !== undefined) process.stdout.write(`${JSON.stringify(rpcError(request.id as Json, -32603, "Internal error."))}\n`);
     }
   });

@@ -19,7 +19,7 @@
     }
   },
   "bin": {
-    "vertexai-memorybank-hermes": "./bin/hermes-mcp.js"
+    "agent-platform-memorybank-hermes": "./bin/hermes-mcp.js"
   },
   "openclaw": {
     "extensions": [
@@ -40,13 +40,15 @@
     "clean": "rm -rf dist",
     "test": "npm run build && node --test test/*.test.mjs",
     "prepare": "npm run build",
-    "prepack": "npm run clean && npm run build"
+    "prepack": "npm run clean && npm run build",
+    "render:architecture": "node scripts/render-architecture.mjs"
   },
   "peerDependencies": {
     "openclaw": ">=2026.3.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "sharp": "^0.34.5",
     "typescript": "^5.3.0"
   },
   "dependencies": {
