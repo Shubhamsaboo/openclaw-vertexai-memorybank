@@ -104,7 +104,8 @@ function installUnhandledRejectionHandler(): void {
   // handler: synchronous programmer errors must still terminate normally.
   process.on("unhandledRejection", (reason) => {
     const type = reason instanceof Error ? reason.name : typeof reason;
-    process.stderr.write(`[memorybank] handled asynchronous dependency rejection (${type}); MCP server remains available.\n`);
+    const message = reason instanceof Error ? reason.message : String(reason);
+    process.stderr.write(`[memorybank] handled asynchronous dependency rejection (${type}): ${message}; MCP server remains available.\n`);
   });
 }
 

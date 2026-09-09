@@ -16,7 +16,7 @@ export interface MemoryBankClient {
   updateMemory(request: unknown): Promise<[any]>;
   getMemory(request: unknown): Promise<[any]>;
   generateMemories(request: unknown): Promise<[any]>;
-  listMemories(request: unknown): Promise<[any[], unknown?, any?]>;
+  listMemories(request: unknown, options?: unknown): Promise<[any[], unknown?, any?]>;
 }
 
 export type CorrectionResult =
@@ -188,9 +188,16 @@ export class MemoryBankService {
     const all: any[] = [];
     let pageToken: string | undefined;
     do {
-      const [memories, , response] = await this.client.listMemories({
-        parent: parentName(this.cfg), filter: scopeFilter(scope), pageSize: 100, pageToken,
-      });
+      // autoPaginate must be explicitly disabled: gax's default streaming
+      // auto-pagination resolves credentials/dispatches errors outside the
+      // returned promise's rejection path, which previously surfaced as an
+      // uncaught exception here (crashing this whole long-lived MCP server)
+      // instead of a normal awaited rejection. With autoPaginate:false the
+      // manual pageToken loop below is also what the SDK actually expects.
+      const [memories, , response] = await this.client.listMemories(
+        { parent: parentName(this.cfg), filter: scopeFilter(scope), pageSize: 100, pageToken },
+        { autoPaginate: false } as any,
+      );
       all.push(...(memories || []));
       pageToken = response?.nextPageToken || undefined;
     } while (pageToken);
